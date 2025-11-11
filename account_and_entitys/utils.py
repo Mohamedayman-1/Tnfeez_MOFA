@@ -1,0 +1,732 @@
+"""
+Utility functions for account_and_entitys app
+
+DEPRECATION NOTICE:
+- get_oracle_report_data() with segment1/2/3 parameters is deprecated
+- Use OracleBalanceReportManager.get_balance_report_data() with dynamic segment_filters instead
+- Legacy function maintained for backward compatibility
+"""
+import requests
+import base64
+import xml.etree.ElementTree as ET
+from xml.sax.saxutils import escape
+import pandas as pd
+from decimal import Decimal, InvalidOperation
+from django.db import transaction
+from .models import XX_BalanceReport
+import json
+import io
+import warnings
+
+from .models import XX_Entity_mapping
+
+# Import new Oracle managers for Phase 5 integration
+try:
+    from .oracle import OracleBalanceReportManager, OracleSegmentMapper
+    ORACLE_MANAGERS_AVAILABLE = True
+except ImportError:
+    ORACLE_MANAGERS_AVAILABLE = False
+    warnings.warn("Oracle managers not available - using legacy implementation")
+
+
+
+######################################################### Oracle Fsuion Balance Report Integration #########################################################
+def safe_decimal_convert(value):
+    """Safely convert value to Decimal, handling various input types"""
+    if pd.isna(value) or value is None or value == '':
+        return None
+    
+    try:
+        # Handle scientific notation and convert to Decimal
+        if isinstance(value, str):
+            value = value.strip()
+            if value.lower() in ['null', 'nan', '']:
+                return None
+        
+        # Convert to float first to handle scientific notation, then to Decimal
+        float_val = float(value)
+        return Decimal(str(float_val))
+    except (ValueError, InvalidOperation, TypeError):
+        print(f"⚠️  Warning: Could not convert '{value}' to Decimal, using None")
+        return None
+
+
+def download_oracle_report(control_budget_name="MIC_HQ_MONTHLY", period_name="sep-25", save_path="report.xlsx"):
+    """
+    Download balance report from Oracle service
+    
+    Args:
+        control_budget_name (str): Budget name parameter for the report
+        save_path (str): Path to save the downloaded Excel file
+        
+    Returns:
+        bool: True if download successful, False otherwise
+    """
+    try:
+        url = "https://hcbg-dev4.fa.ocs.oraclecloud.com:443/xmlpserver/services/ExternalReportWSSService"
+        username = "AFarghaly"
+        password = "Mubadala345"
+
+        escaped_param = escape(control_budget_name)
+        escaped_param2 = escape(period_name)
+
+        soap_body = f"""<?xml version="1.0" encoding="UTF-8"?>
+<soap12:Envelope xmlns:soap12="http://www.w3.org/2003/05/soap-envelope"
+               xmlns:pub="http://xmlns.oracle.com/oxp/service/PublicReportService">
+   <soap12:Header/>
+   <soap12:Body>
+      <pub:runReport>
+         <pub:reportRequest>
+            <pub:reportAbsolutePath>/API/period_balance_report.xdo</pub:reportAbsolutePath>
+            <pub:attributeFormat>xlsx</pub:attributeFormat>
+            <pub:sizeOfDataChunkDownload>-1</pub:sizeOfDataChunkDownload>
+            <pub:parameterNameValues>
+               <pub:item>
+                  <pub:name>P_CONTROL_BUDGET_NAME</pub:name>
+                  <pub:values>
+                     <pub:item>{escaped_param}</pub:item>
+                  </pub:values>
+               </pub:item>
+               <pub:item>
+                  <pub:name>P_PERIOD_NAME</pub:name>
+                  <pub:values>
+                     <pub:item>{escaped_param2}</pub:item>
+                  </pub:values>
+               </pub:item>
+            </pub:parameterNameValues>
+         </pub:reportRequest>
+      </pub:runReport>
+   </soap12:Body>
+</soap12:Envelope>
+"""
+
+        headers = {
+           "Content-Type": "application/soap+xml;charset=UTF-8"
+        }
+
+        response = requests.post(url, data=soap_body.encode('utf-8'), headers=headers, auth=(username, password))
+
+        if response.status_code == 200:
+           ns = {
+              "soap12": "http://www.w3.org/2003/05/soap-envelope",
+              "pub": "http://xmlns.oracle.com/oxp/service/PublicReportService"
+           }
+           root = ET.fromstring(response.text)
+           report_bytes_element = root.find(".//pub:reportBytes", ns)
+           
+           if report_bytes_element is not None and report_bytes_element.text:
+              excel_data = base64.b64decode(report_bytes_element.text)
+              with open(save_path, "wb") as f:
+                    f.write(excel_data)
+              print(f"✅ Report saved as {save_path}")
+              return True
+           else:
+              print("❌ No <reportBytes> found in response")
+              return False
+        else:
+           print(f"❌ HTTP Error {response.status_code}")
+           return False
+           
+    except Exception as e:
+        print(f"❌ Error downloading report: {str(e)}")
+        return False
+
+
+def get_oracle_report_data(control_budget_name="MIC_HQ_MONTHLY", period_name="sep-25", 
+                          segment1=None, segment2=None, segment3=None):
+    """
+    DEPRECATED: Get balance report data with hardcoded segment1/2/3 parameters.
+    
+    This function is maintained for backward compatibility but is DEPRECATED.
+    
+    For new code, use:
+        from account_and_entitys.oracle import OracleBalanceReportManager
+        manager = OracleBalanceReportManager()
+        result = manager.get_balance_report_data(
+            control_budget_name="MIC_HQ_MONTHLY",
+            period_name="sep-25",
+            segment_filters={1: 'E001', 2: 'A100', 3: 'P001'}  # Dynamic segments
+        )
+    
+    Args:
+        control_budget_name (str): Budget name parameter for the report
+        period_name (str): Period name parameter
+        segment1 (str): DEPRECATED - Use segment_filters dict with OracleBalanceReportManager
+        segment2 (str): DEPRECATED - Use segment_filters dict with OracleBalanceReportManager
+        segment3 (str): DEPRECATED - Use segment_filters dict with OracleBalanceReportManager
+        
+    Returns:
+        dict: Response with success status and data
+              Format: {
+                  'success': bool,
+                  'data': list of dict records or None,
+                  'message': str,
+                  'total_records': int
+              }
+    """
+    # Issue deprecation warning
+    warnings.warn(
+        "get_oracle_report_data() with segment1/2/3 is deprecated. "
+        "Use OracleBalanceReportManager.get_balance_report_data() with segment_filters instead.",
+        DeprecationWarning,
+        stacklevel=2
+    )
+    
+    # Try to use new manager if available
+    if ORACLE_MANAGERS_AVAILABLE:
+        try:
+            manager = OracleBalanceReportManager()
+            mapper = OracleSegmentMapper()
+            
+            # Convert legacy segment1/2/3 to new segment_filters format
+            segment_filters = {}
+            if segment1 is not None:
+                # Assume segment1 maps to oracle_segment_number=1
+                segment_type = mapper.get_segment_type_by_oracle_number(1)
+                if segment_type:
+                    segment_filters[segment_type.segment_id] = str(segment1)
+            
+            if segment2 is not None:
+                segment_type = mapper.get_segment_type_by_oracle_number(2)
+                if segment_type:
+                    segment_filters[segment_type.segment_id] = str(segment2)
+            
+            if segment3 is not None:
+                segment_type = mapper.get_segment_type_by_oracle_number(3)
+                if segment_type:
+                    segment_filters[segment_type.segment_id] = str(segment3)
+            
+            # Use new manager
+            print(f"⚠️  Using OracleBalanceReportManager (legacy wrapper)")
+            return manager.get_balance_report_data(
+                control_budget_name=control_budget_name,
+                period_name=period_name,
+                segment_filters=segment_filters
+            )
+        except Exception as e:
+            print(f"⚠️  New manager failed, falling back to legacy: {e}")
+            # Fall through to legacy implementation
+    
+    # Legacy implementation (fallback)
+    result = {
+        'success': False,
+        'data': None,
+        'message': '',
+        'total_records': 0
+    }
+    
+    try:
+        url = "https://hcbg-dev4.fa.ocs.oraclecloud.com:443/xmlpserver/services/ExternalReportWSSService"
+        username = "AFarghaly"
+        password = "Mubadala345"
+
+        escaped_param = escape(control_budget_name)
+        escaped_param2 = escape(period_name)
+        
+        # Build parameter list - add segment filters if provided
+        parameters = []
+        
+        # Always include the main parameters
+        parameters.append(f"""
+               <pub:item>
+                  <pub:name>P_CONTROL_BUDGET_NAME</pub:name>
+                  <pub:values>
+                     <pub:item>{escaped_param}</pub:item>
+                  </pub:values>
+               </pub:item>""")
+        
+        parameters.append(f"""
+               <pub:item>
+                  <pub:name>P_PERIOD_NAME</pub:name>
+                  <pub:values>
+                     <pub:item>{escaped_param2}</pub:item>
+                  </pub:values>
+               </pub:item>""")
+        
+        # Add segment filters if provided
+        if segment1:
+            escaped_segment1 = escape(str(segment1))
+            parameters.append(f"""
+               <pub:item>
+                  <pub:name>P_SEGMENT1</pub:name>
+                  <pub:values>
+                     <pub:item>{escaped_segment1}</pub:item>
+                  </pub:values>
+               </pub:item>""")
+        
+        if segment2:
+            escaped_segment2 = escape(str(segment2))
+            parameters.append(f"""
+               <pub:item>
+                  <pub:name>P_SEGMENT2</pub:name>
+                  <pub:values>
+                     <pub:item>{escaped_segment2}</pub:item>
+                  </pub:values>
+               </pub:item>""")
+        
+        if segment3:
+            escaped_segment3 = escape(str(segment3))
+            parameters.append(f"""
+               <pub:item>
+                  <pub:name>P_SEGMENT3</pub:name>
+                  <pub:values>
+                     <pub:item>{escaped_segment3}</pub:item>
+                  </pub:values>
+               </pub:item>""")
+
+        parameters_xml = "".join(parameters)
+
+        soap_body = f"""<?xml version="1.0" encoding="UTF-8"?>
+<soap12:Envelope xmlns:soap12="http://www.w3.org/2003/05/soap-envelope"
+               xmlns:pub="http://xmlns.oracle.com/oxp/service/PublicReportService">
+   <soap12:Header/>
+   <soap12:Body>
+      <pub:runReport>
+         <pub:reportRequest>
+            <pub:reportAbsolutePath>API/get_Ava_Fund_report.xdo</pub:reportAbsolutePath>
+            <pub:attributeFormat>xlsx</pub:attributeFormat>
+            <pub:sizeOfDataChunkDownload>-1</pub:sizeOfDataChunkDownload>
+            <pub:parameterNameValues>{parameters_xml}
+            </pub:parameterNameValues>
+         </pub:reportRequest>
+      </pub:runReport>
+   </soap12:Body>
+</soap12:Envelope>
+"""
+
+        headers = {
+           "Content-Type": "application/soap+xml;charset=UTF-8"
+        }
+
+        print(f"🔍 Fetching Oracle report data for segments: {segment1}, {segment2}, {segment3}")
+        response = requests.post(url, data=soap_body.encode('utf-8'), headers=headers, auth=(username, password))
+
+        if response.status_code == 200:
+           ns = {
+              "soap12": "http://www.w3.org/2003/05/soap-envelope",
+              "pub": "http://xmlns.oracle.com/oxp/service/PublicReportService"
+           }
+           root = ET.fromstring(response.text)
+           report_bytes_element = root.find(".//pub:reportBytes", ns)
+           
+           if report_bytes_element is not None and report_bytes_element.text:
+              # Decode the Excel data (binary, don't decode as UTF-8)
+              excel_data = base64.b64decode(report_bytes_element.text)
+              
+              # Parse Excel data into DataFrame using BytesIO
+              excel_reader = pd.read_excel(io.BytesIO(excel_data), engine='openpyxl')
+              
+              # Check if the first row contains column headers or if we need to skip rows
+              if len(excel_reader) > 0:
+                  # Check if first row has the expected columns
+                  if 'CONTROL_BUDGET_NAME' not in excel_reader.columns:
+                      # Try reading again, skipping the first few rows which might be title/header rows
+                      for skip_rows in range(1, 5):
+                          try:
+                              excel_reader = pd.read_excel(io.BytesIO(excel_data), engine='openpyxl', skiprows=skip_rows)
+                              if 'CONTROL_BUDGET_NAME' in excel_reader.columns:
+                                  break
+                          except:
+                              continue
+              
+              # Clean column names
+              excel_reader.columns = excel_reader.columns.str.strip()
+              
+              # Convert DataFrame to list of dictionaries
+              data_list = []
+              for index, row in excel_reader.iterrows():
+                  # Skip empty rows or summary rows
+                  if pd.isna(row.get('CONTROL_BUDGET_NAME')) or str(row.get('CONTROL_BUDGET_NAME', '')).strip() == '':
+                      continue
+                  
+                  # Skip rows that might be totals or summaries
+                  if str(row.get('CONTROL_BUDGET_NAME', '')).strip() in ['Total', 'TOTAL', '']:
+                      continue
+                  
+                  record = {
+                      'segment1': str(int(float(row.get('SEGMENT1', 0)))).strip() if pd.notna(row.get('SEGMENT1')) and str(row.get('SEGMENT1', '')).strip() != '' else None,
+                      'segment2': str(int(float(row.get('SEGMENT2', 0)))).strip() if pd.notna(row.get('SEGMENT2')) and str(row.get('SEGMENT2', '')).strip() != '' else None,
+                      'segment3': str(row.get('SEGMENT3', '')).strip() if pd.notna(row.get('SEGMENT3')) else None,
+                      'actual_ytd': float(row.get('PTD_ACTUAL_AMOUNT', 0)) if pd.notna(row.get('PTD_ACTUAL_AMOUNT')) and str(row.get('PTD_ACTUAL_AMOUNT', '')).strip() != '' else 0.0,
+                      'as_of_period': str(row.get('BUDGET_PERIOD', '')).strip() if pd.notna(row.get('BUDGET_PERIOD')) else None,
+                      'funds_available_asof': float(row.get('FUNDS_AVAILABLE_AMOUNT', 0)) if pd.notna(row.get('FUNDS_AVAILABLE_AMOUNT')) and str(row.get('FUNDS_AVAILABLE_AMOUNT', '')).strip() != '' else 0.0,
+                      'encumbrance_ytd': float(row.get('ENCUMBRANCE_PTD', 0)) if pd.notna(row.get('ENCUMBRANCE_PTD')) and str(row.get('ENCUMBRANCE_PTD', '')).strip() != '' else 0.0,
+                      'other_ytd': float(row.get('OTHER_PTD', 0)) if pd.notna(row.get('OTHER_PTD')) and str(row.get('OTHER_PTD', '')).strip() != '' else 0.0,
+                      'budget_ytd': float(row.get('BUDGET_PTD', 0)) if pd.notna(row.get('BUDGET_PTD')) and str(row.get('BUDGET_PTD', '')).strip() != '' else 0.0,
+                      'control_budget_name': str(row.get('CONTROL_BUDGET_NAME', '')).strip() if pd.notna(row.get('CONTROL_BUDGET_NAME')) else None,
+                      'ledger_name': str(row.get('LEDGER_NAME', '')).strip() if pd.notna(row.get('LEDGER_NAME')) else None,
+                      # Add missing fields from Oracle response
+                      'budget_adjustments': float(row.get('BUDGET_ADJUSTMENTS', 0)) if pd.notna(row.get('BUDGET_ADJUSTMENTS')) and str(row.get('BUDGET_ADJUSTMENTS', '')).strip() != '' else 0.0,
+                      'commitments': float(row.get('COMMITMENTS', 0)) if pd.notna(row.get('COMMITMENTS')) and str(row.get('COMMITMENTS', '')).strip() != '' else 0.0,
+                      'expenditures': float(row.get('EXPENDITURES', 0)) if pd.notna(row.get('EXPENDITURES')) and str(row.get('EXPENDITURES', '')).strip() != '' else 0.0,
+                      'initial_budget': float(row.get('INITIAL_BUDGET', 0)) if pd.notna(row.get('INITIAL_BUDGET')) and str(row.get('INITIAL_BUDGET', '')).strip() != '' else 0.0,
+                      'obligations': float(row.get('OBLIGATIONS', 0)) if pd.notna(row.get('OBLIGATIONS')) and str(row.get('OBLIGATIONS', '')).strip() != '' else 0.0,
+                      'other_consumption': float(row.get('OTHER_CONSUMPTION', 0)) if pd.notna(row.get('OTHER_CONSUMPTION')) and str(row.get('OTHER_CONSUMPTION', '')).strip() != '' else 0.0,
+                      'total_budget': float(row.get('TOTAL_BUDGET', 0)) if pd.notna(row.get('TOTAL_BUDGET')) and str(row.get('TOTAL_BUDGET', '')).strip() != '' else 0.0,
+                      'total_consumption': float(row.get('TOTAL_CONSUMPTION', 0)) if pd.notna(row.get('TOTAL_CONSUMPTION')) and str(row.get('TOTAL_CONSUMPTION', '')).strip() != '' else 0.0,
+                      'unreleased': float(row.get('UNRELEASED', 0)) if pd.notna(row.get('UNRELEASED')) and str(row.get('UNRELEASED', '')).strip() != '' else 0.0,
+                  }
+                  data_list.append(record)
+              
+              result['success'] = True
+              result['data'] = data_list
+              result['total_records'] = len(data_list)
+              result['message'] = f"Successfully retrieved {len(data_list)} records"
+              
+              print(f"✅ Successfully retrieved {len(data_list)} records from Oracle")
+              return result
+              
+           else:
+              result['message'] = "No <reportBytes> found in response"
+              print("❌ No <reportBytes> found in response")
+              return result
+        else:
+           result['message'] = f"HTTP Error {response.status_code}"
+           print(f"❌ HTTP Error {response.status_code}")
+           return result
+           
+    except Exception as e:
+        result['message'] = f"Error fetching report data: {str(e)}"
+        print(f"❌ Error fetching report data: {str(e)}")
+        return result
+
+
+def load_excel_to_balance_report_table(excel_file_path="report.xlsx", clear_existing=True):
+    """
+    Load Excel data into XX_BalanceReport table
+    
+    Args:
+        excel_file_path (str): Path to the Excel file
+        clear_existing (bool): Whether to clear existing data before loading
+        
+    Returns:
+        dict: Result with success status, created count, and error details
+    """
+    result = {
+        'success': False,
+        'created_count': 0,
+        'error_count': 0,
+        'deleted_count': 0,
+        'errors': [],
+        'message': ''
+    }
+    
+    try:
+        print("📊 Starting to load Excel data into database...")
+        
+        with transaction.atomic():
+            # Clear all existing data from the table if requested
+            if clear_existing:
+                deleted_count = XX_BalanceReport.objects.all().delete()[0]
+                result['deleted_count'] = deleted_count
+                print(f"🗑️  Deleted {deleted_count} existing records from XX_BalanceReport table")
+            
+            # Read Excel file with proper header handling
+            df = pd.read_excel(excel_file_path, header=0)
+            
+            # Check if the first row contains column headers
+            if df.iloc[0, 0] == 'CONTROL_BUDGET_NAME':
+                # First data row contains the headers, use it as column names
+                new_header = df.iloc[0]  # Grab the first row for the header
+                df = df[1:]  # Take the data less the header row
+                df.columns = new_header  # Set the header row as the df header
+                df.reset_index(drop=True, inplace=True)
+            
+            print(f"📖 Read {len(df)} rows from Excel file")
+            
+            # Clean column names
+            df.columns = df.columns.str.strip()
+            
+            # Expected columns
+            expected_columns = [
+                'CONTROL_BUDGET_NAME', 'LEDGER_NAME', 'AS_OF_PERIOD', 'SEGMENT1', 
+                'SEGMENT2', 'SEGMENT3', 'ENCUMBRANCE_PTD', 'OTHER_PTD', 'ACTUAL_PTD', 
+                'FUNDS_AVAILABLE_ASOF', 'BUDGET_PTD'
+            ]
+            
+            # Check if required columns exist
+            missing_columns = [col for col in expected_columns if col not in df.columns]
+            if missing_columns:
+                result['message'] = f"Missing columns: {missing_columns}"
+                return result
+            
+            created_count = 0
+            error_count = 0
+            errors = []
+            
+            # Process each row
+            for index, row in df.iterrows():
+                try:
+                    # Skip empty rows or summary rows
+                    if pd.isna(row['CONTROL_BUDGET_NAME']) or str(row['CONTROL_BUDGET_NAME']).strip() == '':
+                        continue
+                    
+                    # Skip rows that might be totals or summaries
+                    if str(row['CONTROL_BUDGET_NAME']).strip() in ['Total', 'TOTAL', '']:
+                        continue
+                    
+                    # Create model instance
+                    balance_report = XX_BalanceReport(
+                        control_budget_name=str(row['CONTROL_BUDGET_NAME']).strip() if pd.notna(row['CONTROL_BUDGET_NAME']) else None,
+                        ledger_name=str(row['LEDGER_NAME']).strip() if pd.notna(row['LEDGER_NAME']) else None,
+                        as_of_period=str(row['AS_OF_PERIOD']).strip() if pd.notna(row['AS_OF_PERIOD']) else None,
+                        segment1=str(row['SEGMENT1']).strip() if pd.notna(row['SEGMENT1']) else None,
+                        segment2=str(row['SEGMENT2']).strip() if pd.notna(row['SEGMENT2']) else None,
+                        segment3=str(row['SEGMENT3']).strip() if pd.notna(row['SEGMENT3']) else None,
+                        encumbrance_ytd=safe_decimal_convert(row['ENCUMBRANCE_PTD']),
+                        other_ytd=safe_decimal_convert(row['OTHER_PTD']),
+                        actual_ytd=safe_decimal_convert(row['ACTUAL_PTD']),
+                        funds_available_asof=safe_decimal_convert(row['FUNDS_AVAILABLE_ASOF']),
+                        budget_ytd=safe_decimal_convert(row['BUDGET_PTD'])
+                    )
+                    
+                    balance_report.save()
+                    created_count += 1
+                    
+                    if created_count % 50 == 0:  # Progress indicator
+                        print(f"📝 Processed {created_count} records...")
+                        
+                except Exception as e:
+                    error_count += 1
+                    error_detail = {
+                        'row': index + 1,
+                        'error': str(e),
+                        'data': dict(row) if hasattr(row, 'to_dict') else str(row)
+                    }
+                    errors.append(error_detail)
+                    continue
+            
+            result['success'] = True
+            result['created_count'] = created_count
+            result['error_count'] = error_count
+            result['errors'] = errors
+            result['message'] = f"Successfully loaded {created_count} records"
+            
+            print(f"✅ Successfully loaded {created_count} records into XX_BalanceReport table")
+            if error_count > 0:
+                print(f"⚠️  {error_count} rows had errors and were skipped")
+            
+            return result
+        
+    except Exception as e:
+        result['message'] = f"Error loading Excel data: {str(e)}"
+        print(f"❌ {result['message']}")
+        return result
+
+
+def refresh_balance_report_data(control_budget_name="MIC_HQ_MONTHLY", period_name="sep-25"):
+    """
+    Complete process: Download report from Oracle and load into database
+    
+    Args:
+        control_budget_name (str): Budget name parameter for the report
+        
+    Returns:
+        dict: Result with success status and details
+    """
+    result = {
+        'success': False,
+        'download_success': False,
+        'load_success': False,
+        'message': '',
+        'details': {}
+    }
+    
+    try:
+        print(f"🚀 Starting report refresh for: {control_budget_name} (Period: {period_name})")
+        
+        # Step 1: Download the report
+        download_success = download_oracle_report(control_budget_name, period_name, "report.xlsx")
+        result['download_success'] = download_success
+        
+        if not download_success:
+            result['message'] = "Failed to download report from Oracle"
+            return result
+        
+        # Step 2: Load data into database
+        load_result = load_excel_to_balance_report_table("report.xlsx", clear_existing=True)
+        result['load_success'] = load_result['success']
+        result['details'] = load_result
+        
+        if load_result['success']:
+            result['success'] = True
+            result['message'] = f"Successfully refreshed balance report data. Created {load_result['created_count']} records."
+            
+            # Display summary statistics
+            total_records = XX_BalanceReport.objects.count()
+            print(f"📊 Total records in XX_BalanceReport table: {total_records}")
+            
+            # Show available periods
+            periods = XX_BalanceReport.objects.values_list('as_of_period', flat=True).distinct()
+            print(f"📅 Available periods: {list(periods)}")
+            
+        else:
+            result['message'] = f"Downloaded report but failed to load data: {load_result['message']}"
+            
+        return result
+        
+    except Exception as e:
+        result['message'] = f"Error during report refresh: {str(e)}"
+        return result
+
+
+def extract_unique_segments_from_data(balance_data):
+    """
+    Extract unique segments from balance report data structure
+    
+    Args:
+        balance_data (list): List of balance report records with segment fields
+        
+    Returns:
+        dict: Dictionary containing unique values for each segment
+    """
+    try:
+        if not balance_data:
+            return {
+                'segment1': [],
+                'segment2': [],
+                'segment3': [],
+                'message': 'No data provided'
+            }
+        
+        # Extract unique values for each segment
+        segment1_values = set()
+        segment2_values = set()
+        segment3_values = set()
+        
+        for record in balance_data["data"]:
+            # Handle both string and float values
+            if 'segment1' in record and record['segment1'] is not None:
+                segment1_val = str(record['segment1']).rstrip('.0') if isinstance(record['segment1'], (int, float)) else str(record['segment1'])
+                segment1_values.add(segment1_val)
+                
+            if 'segment2' in record and record['segment2'] is not None:
+                segment2_val = str(record['segment2']).rstrip('.0') if isinstance(record['segment2'], (int, float)) else str(record['segment2'])
+                segment2_values.add(segment2_val)
+                
+            if 'segment3' in record and record['segment3'] is not None:
+                segment3_val = str(record['segment3']).rstrip('.0') if isinstance(record['segment3'], (int, float)) else str(record['segment3'])
+                segment3_values.add(segment3_val)
+        
+        # Convert to sorted lists
+        return {
+            'Cost_Center': sorted(list(segment1_values)),
+            'Account': sorted(list(segment2_values)),
+            'Project': sorted(list(segment3_values)),
+            'total_records': len(balance_data),
+            'unique_combinations': len(balance_data)
+        }
+        
+    except Exception as e:
+        return {
+            'segment1': [],
+            'segment2': [],
+            'segment3': [],
+            'error': f'Error extracting segments: {str(e)}'
+        }
+
+
+########################################################## End of Oracle Fusion Balance Report Integration #########################################################
+
+
+
+########################################################### Other Utility Functions #########################################################
+
+def get_mapping_for_fusion_data():
+    """
+    Get mapping for Oracle Fusion data fields to internal fields.
+
+    Returns:
+        dict: Mapping of Oracle Fusion fields to internal fields.
+    """
+
+    Fusion_data = get_oracle_report_data(control_budget_name="MIC_HQ_MONTHLY", period_name='sep-25')
+    
+    # Extract segment1 values from the data
+    segment1_values = []
+    segment2_values = []
+    segment3_values = []
+    
+    if Fusion_data.get('success') and Fusion_data.get('data'):
+        print(f"Total records found: {len(Fusion_data['data'])}")
+        
+        for item in Fusion_data['data']:
+            # Get segment1 value
+            segment1 = item.get('segment1')
+            if segment1:
+                segment1_values.append(segment1)
+                
+            # Get segment2 value
+            segment2 = item.get('segment2') 
+            if segment2:
+                segment2_values.append(segment2)
+                
+            # Get segment3 value
+            segment3 = item.get('segment3')
+            if segment3:
+                segment3_values.append(segment3)
+                
+            # Print first few items for debugging
+            if len(segment1_values) <= 5:
+                print(f"Item {len(segment1_values)}: segment1={segment1}, segment2={segment2}, segment3={segment3}")
+        
+        # Get unique values
+        unique_segment1 = list(set(segment1_values))
+        unique_segment2 = list(set(segment2_values))
+        unique_segment3 = list(set(segment3_values))
+
+
+        list_of_mappings = []
+
+        for unique in unique_segment1:
+
+                data=XX_Entity_mapping.objects.filter(source_entity=int(unique))
+                if data:
+                    if data.Target_entity == "IGNORE":
+                        return_data={
+                            'source_entity': unique,
+                            'Target_entity': unique,
+                        }
+                    elif data.Target_entity != "IGNORE":
+                        return_data={
+                            'source_entity': unique,
+                            'Target_entity': data.target_entity,
+                        }
+                    list_of_mappings.append(return_data)
+
+                else:
+                        return_data={
+                            'entity_code': unique,
+                            'entity_name': "AbuDhabi",
+                        }
+                        list_of_mappings.append(return_data)
+                
+
+       
+                
+        
+
+        
+        
+        
+        return {
+            'success': True,
+            'data': list_of_mappings,
+            'total_records': len(list_of_mappings),
+
+        }
+    else:
+        print("No data found or request failed")
+        return {
+            'success': False,
+            'message': Fusion_data.get('message', 'No data available'),
+            'segment1_values': [],
+            'segment2_values': [],
+            'segment3_values': []
+        }
+    
+
+
+
+
+########################################################### End of Other Utility Functions #########################################################

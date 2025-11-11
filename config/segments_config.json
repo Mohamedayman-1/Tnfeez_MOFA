@@ -1,0 +1,54 @@
+{
+  "client_id": "DEFAULT_CLIENT",
+  "client_name": "Default Configuration (3 Segments)",
+  "installation_date": "2025-11-05",
+  "segments": [
+    {
+      "segment_id": 1,
+      "segment_name": "Entity",
+      "segment_type": "cost_center",
+      "oracle_segment_number": 1,
+      "is_required": true,
+      "has_hierarchy": true,
+      "max_length": 50,
+      "display_order": 1,
+      "description": "Cost Center / Entity segment"
+    },
+    {
+      "segment_id": 2,
+      "segment_name": "Account",
+      "segment_type": "account",
+      "oracle_segment_number": 2,
+      "is_required": true,
+      "has_hierarchy": true,
+      "max_length": 50,
+      "display_order": 2,
+      "description": "Chart of Accounts segment"
+    },
+    {
+      "segment_id": 3,
+      "segment_name": "Project",
+      "segment_type": "project",
+      "oracle_segment_number": 3,
+      "is_required": false,
+      "has_hierarchy": true,
+      "max_length": 50,
+      "display_order": 3,
+      "description": "Project / Program segment"
+    }
+  ],
+  "oracle_config": {
+    "max_segments_supported": 30,
+    "ledger_id": "CHANGE_ME",
+    "balance_report_segment_mapping": {
+      "segment1": 1,
+      "segment2": 2,
+      "segment3": 3
+    }
+  },
+  "validation_rules": {
+    "allow_cross_segment_transfers": true,
+    "require_envelope_check": true,
+    "enforce_hierarchy_constraints": true
+  }
+}
