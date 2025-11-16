@@ -322,7 +322,12 @@ class OracleSegmentMapper:
         for i in range(1, 31):
             segment_field = f'SEGMENT{i}'
             if segment_field not in fbdi_row:
-                fbdi_row[segment_field] = None
+                ## get defualt values from segments
+                value=XX_Segment.objects.filter(segment_type=i,is_active=True).first()
+                if value:
+                    fbdi_row[segment_field] = value.code
+                else:
+                    fbdi_row[segment_field] = None
         
         return fbdi_row
     

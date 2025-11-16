@@ -19,6 +19,8 @@ from django.db import transaction
 
 from account_and_entitys.models import XX_SegmentType, XX_Segment
 from account_and_entitys.oracle.oracle_segment_mapper import OracleSegmentMapper
+import os
+
 
 
 class OracleBalanceReportManager:
@@ -33,10 +35,12 @@ class OracleBalanceReportManager:
     """
     
     # Oracle connection settings (should be moved to settings.py or .env)
-    ORACLE_URL = "https://hcbg-dev4.fa.ocs.oraclecloud.com:443/xmlpserver/services/ExternalReportWSSService"
-    ORACLE_USERNAME = "AFarghaly"
-    ORACLE_PASSWORD = "Mubadala345"
-    REPORT_PATH = "API/get_Ava_Fund_report.xdo"
+    # Note: Use xmlpserver endpoint for BI Publisher SOAP reports, not fscmRestApi
+    ORACLE_URL = os.getenv("ORACLE_XMLP_URL", "https://iabakf-test.fa.ocs.oraclecloud.com/xmlpserver/services/ExternalReportWSSService")
+    ORACLE_USERNAME = os.getenv("FUSION_USER", "AFarghaly")
+    ORACLE_PASSWORD = os.getenv("FUSION_PASS", "Mubadala345")
+    REPORT_PATH = "Custom/API/get_Ava_Fund_report.xdo"
+    Get_value_from_segment="Custom/API/Get_value_from_segment_report.xdo"
     
     @staticmethod
     def get_balance_report_data(
@@ -363,3 +367,228 @@ class OracleBalanceReportManager:
         except Exception as e:
             print(f"❌ Error saving balance report: {str(e)}")
             return False
+
+    @staticmethod
+    def download_segment_values_and_load_to_database(segment_type_id: int) -> bool:
+        """
+        Download segment values from Oracle reports and load to database.
+        
+        Args:
+            segment_type_id: The segment type ID to download values for
+            
+        Returns:
+            bool: True if successful
+        """
+                                 # 11             # 9                   5
+        control_budget_names = ["MOFA_BUDGET", "MOFA_COST_CENTER", "MOFA_GEOGRAPHIC_CLASS"]
+        all_segment_values = set()  # Store unique segment values
+        from account_and_entitys.models import XX_SegmentType, XX_Segment  # Assuming models are in models.py
+        
+        try:
+            # Get the segment type
+            try:
+                segment_type = XX_SegmentType.objects.get(segment_id=segment_type_id)
+                oracle_field_num = OracleSegmentMapper.get_oracle_field_number(segment_type_id)
+                print(f"🔍 Downloading values for segment type: {segment_type.segment_name} (Oracle field: SEGMENT{oracle_field_num})")
+            except XX_SegmentType.DoesNotExist:
+                print(f"❌ Segment type {segment_type_id} does not exist")
+                return False
+            
+            # Iterate through each control budget name
+            for control_budget in control_budget_names:
+                print(f"\n📥 Processing control budget: {control_budget}")
+                
+                # Build SOAP request to get the report
+                escaped_budget = escape(control_budget)
+                
+                # SOAP 1.2 envelope to match ExternalReportWSSService endpoint
+                soap_body = f"""<?xml version="1.0" encoding="UTF-8"?>
+<soap12:Envelope xmlns:soap12="http://www.w3.org/2003/05/soap-envelope"
+                 xmlns:pub="http://xmlns.oracle.com/oxp/service/PublicReportService">
+   <soap12:Header/>
+   <soap12:Body>
+      <pub:runReport>
+         <pub:reportRequest>
+            <pub:reportAbsolutePath>{OracleBalanceReportManager.Get_value_from_segment}</pub:reportAbsolutePath>
+            <pub:attributeFormat>xlsx</pub:attributeFormat>
+            <pub:sizeOfDataChunkDownload>-1</pub:sizeOfDataChunkDownload>
+            <pub:parameterNameValues>
+               <pub:item>
+                  <pub:name>VALUE_SET_CODE</pub:name>
+                  <pub:values>
+                     <pub:item>{escaped_budget}</pub:item>
+                  </pub:values>
+               </pub:item>
+            </pub:parameterNameValues>
+         </pub:reportRequest>
+      </pub:runReport>
+   </soap12:Body>
+</soap12:Envelope>
+"""
+                
+                # SOAP 1.2 requires application/soap+xml
+                headers = {
+                    "Content-Type": "application/soap+xml;charset=UTF-8"
+                }
+                url=OracleBalanceReportManager.ORACLE_URL
+                
+                # Debug: Print credentials being used
+                print(f"   🔑 URL: {url}")
+                print(f"   🔑 Username: {OracleBalanceReportManager.ORACLE_USERNAME}")
+                print(f"   🔑 Password: {'*' * len(OracleBalanceReportManager.ORACLE_PASSWORD) if OracleBalanceReportManager.ORACLE_PASSWORD else 'None'}")
+                
+                # Call Oracle SOAP service
+                response = requests.post(
+                    url,
+                    data=soap_body.encode('utf-8'),
+                    headers=headers,
+                    auth=(OracleBalanceReportManager.ORACLE_USERNAME, OracleBalanceReportManager.ORACLE_PASSWORD)
+                )
+                
+                if response.status_code != 200:
+                    print(f"❌ HTTP Error {response.status_code} for {control_budget}")
+                    print(f"Response Headers: {response.headers}")
+                    print(f"Response Body:\n{response.text}")
+                    print("Skipping this budget and continuing...")
+                    continue
+                
+                # Parse SOAP response (SOAP 1.2 namespace)
+                ns = {
+                    "soap12": "http://www.w3.org/2003/05/soap-envelope",
+                    "pub": "http://xmlns.oracle.com/oxp/service/PublicReportService"
+                }
+                root = ET.fromstring(response.text)
+                report_bytes_element = root.find(".//pub:reportBytes", ns)
+                
+                if report_bytes_element is None or not report_bytes_element.text:
+                    print(f"⚠️  No report data found for {control_budget}, skipping...")
+                    continue
+                
+                # Decode Excel data to memory
+                excel_data = base64.b64decode(report_bytes_element.text)
+                print(f"   ✅ Downloaded Excel file ({len(excel_data)} bytes)")
+                
+                # Load Excel into DataFrame (in memory)
+                df = pd.read_excel(io.BytesIO(excel_data), engine='openpyxl')
+
+                
+                # Check if first row is header
+                if len(df) > 0 and df.iloc[0, 0] == 'VALUE_SET_CODE':
+                    df = pd.read_excel(io.BytesIO(excel_data), header=1, engine='openpyxl')
+                
+                # Clean column names
+                df.columns = df.columns.str.strip()
+                
+                # Get current date for filtering
+                from datetime import datetime
+                current_date = datetime.now().date()
+                
+                # Convert all rows to array of dictionaries
+                print(f"   Available columns: {df.columns.tolist()}")
+                records_array = df.to_dict('records')  
+                
+                # Filter records based on conditions
+                Created = 0
+                for row in records_array:
+                    # Check SUMMARY_FLAG = 'N'
+                    summary_flag = row.get("SUMMARY_FLAG")
+                    if summary_flag != 'N':
+                        continue
+                    
+                    # Check ENABLED_FLAG = 'Y'
+                    enabled_flag = row.get("ENABLED_FLAG")
+                    if enabled_flag != 'Y':
+                        continue
+                    
+                    # Check date range: START_DATE_ACTIVE <= sysdate <= END_DATE_ACTIVE
+                    start_date = row.get("START_DATE_ACTIVE")
+                    end_date = row.get("END_DATE_ACTIVE")
+                    
+                    # Convert dates to datetime.date objects safely
+                    try:
+                        if pd.notna(start_date):
+                            if isinstance(start_date, datetime):
+                                start_date = start_date.date()
+                            else:
+                                # Handle Excel date (float) or string
+                                start_date = pd.to_datetime(start_date).date()
+                        else:
+                            start_date = None
+                    except:
+                        start_date = None
+                    
+                    try:
+                        if pd.notna(end_date):
+                            if isinstance(end_date, datetime):
+                                end_date = end_date.date()
+                            else:
+                                # Handle Excel date (float) or string
+                                end_date = pd.to_datetime(end_date).date()
+                        else:
+                            end_date = None
+                    except:
+                        end_date = None
+                    
+                    # Check if current date is within range
+                    if start_date and current_date < start_date:
+                        continue
+                    if end_date and current_date > end_date:
+                        continue
+                    
+                    # All conditions passed, add the value
+                    value = row.get("VALUE")
+                    description = row.get("DESCRIPTION", "")
+                    
+                    # Format dates as DD-MM-YYYY
+                    start_date_str = start_date.strftime("%d-%m-%Y") if start_date else None
+                    end_date_str = end_date.strftime("%d-%m-%Y") if end_date else None
+                    
+                    if value and str(value).strip():
+                        all_segment_values.add(str(value).strip())
+                        code = ""
+                        parent_code = None
+                        level = 0
+                        segment_type = None
+
+                        if control_budget == control_budget_names[0]:
+                            code = str(value).strip()
+                            segment_type=11
+                        elif control_budget == control_budget_names[1]:
+                            code = str(value).strip()
+                            segment_type=9
+                        elif control_budget == control_budget_names[2]:
+                            code = str(value).strip()
+                            segment_type=5
+
+                        try:
+                            XX_Segment.objects.create(
+                                code=code,
+                                segment_type_id=segment_type,
+                                parent_code=parent_code,
+                                alias=description,
+                                level=level,
+
+                            )
+                            Created += 1
+                            print(f"   ✅ Created segment {code}")
+
+                        except Exception as e:
+                            print(f"   ⚠️  Could not create segment {code}: {e}")
+                        
+
+                        Created += 1
+                    
+                
+                print(f"   📊 Found {len(records_array)} records, {Created} matched filters (SUMMARY_FLAG=N, ENABLED_FLAG=Y, date active)")
+
+
+
+            return True
+            
+        except Exception as e:
+            print(f"❌ Error downloading segment values: {str(e)}")
+            import traceback
+            traceback.print_exc()
+            return False
+
+        

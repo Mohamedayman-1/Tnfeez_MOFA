@@ -50,6 +50,7 @@ from django.db.models import CharField
 from django.db.models.functions import Cast
 from django.db.models import Q
 from .utils import get_oracle_report_data, get_mapping_for_fusion_data
+from .oracle.oracle_balance_report_manager import OracleBalanceReportManager
 
 
 class EntityPagination(PageNumberPagination):
@@ -61,142 +62,8 @@ class EntityPagination(PageNumberPagination):
 
 
 # Unified Dynamic Segment View
-class SegmentListView(APIView):
-    """Fully dynamic view to list segments based on configured segment types in XX_SegmentType table
-    
-    Works with any number of segment types (not limited to 3) and retrieves segment type info dynamically.
-    
-    Query Parameters:
-    - segment_type: REQUIRED - Segment type ID to retrieve (from XX_SegmentType table)
-                    Can also use segment_name (e.g., 'Entity', 'Account', 'Project', or any custom type)
-    - search: Filter by code or alias (optional)
-    - filter: Segment filter type (optional, default='all')
-        * 'all': All segments regardless of level (default)
-        * 'root' or 'zero_level': Only root segments (level=0)
-        * 'leaf' or 'children': Only leaf segments (segments with no children)
-        * 'exclude_leaf': All segments except leaf segments (only parents)
-        * 'exclude_root': All segments except root segments (only non-root)
-    """
 
-    permission_classes = [IsAuthenticated]
-    pagination_class = EntityPagination
-
-    def get(self, request):
-        search_query = request.query_params.get("search", None)
-        filter_type = request.query_params.get("filter", "all").lower()
-        segment_type_param = request.query_params.get("segment_type", None)
-
-        # Validate segment_type parameter
-        if not segment_type_param:
-            # Get available segment types for error message
-            available_types = XX_SegmentType.objects.all().values('segment_id', 'segment_name')
-            types_list = [f"{t['segment_id']}={t['segment_name']}" for t in available_types]
-            
-            return Response(
-                {
-                    "message": "segment_type parameter is required.",
-                    "available_segment_types": types_list,
-                    "data": []
-                },
-                status=status.HTTP_400_BAD_REQUEST
-            )
-
-        # Try to find segment type by ID or by name
-        segment_type_obj = None
-        
-        # First try as ID (integer)
-        try:
-            segment_type_id = int(segment_type_param)
-            segment_type_obj = XX_SegmentType.objects.filter(segment_id=segment_type_id).first()
-        except (ValueError, TypeError):
-            # If not an integer, try as name
-            segment_type_obj = XX_SegmentType.objects.filter(
-                segment_name__iexact=segment_type_param
-            ).first()
-        
-        # If still not found, return error with available types
-        if not segment_type_obj:
-            available_types = XX_SegmentType.objects.all().values('segment_id', 'segment_name')
-            types_list = [f"{t['segment_id']}={t['segment_name']}" for t in available_types]
-            
-            return Response(
-                {
-                    "message": f"Invalid segment_type '{segment_type_param}'. Not found in configured segment types.",
-                    "available_segment_types": types_list,
-                    "data": []
-                },
-                status=status.HTTP_404_NOT_FOUND
-            )
-
-        # Start with base query for segments
-        segments = XX_Segment.objects.filter(
-            segment_type=segment_type_obj,
-            is_active=True
-        )
-
-        # Apply filter based on filter_type parameter
-        if filter_type in ['root', 'zero_level']:
-            # Only root segments (level=0)
-            segments = segments.filter(level=0)
-        
-        elif filter_type in ['leaf', 'children']:
-            # Only leaf segments (segments that are not parents to any other segment)
-            # Get all codes that are referenced as parent_code
-            parent_codes = XX_Segment.objects.filter(
-                segment_type=segment_type_obj,
-                parent_code__isnull=False
-            ).exclude(parent_code='').values_list('parent_code', flat=True).distinct()
-            
-            # Only include segments whose code does NOT appear as a parent
-            segments = segments.exclude(code__in=parent_codes)
-        
-        elif filter_type == 'exclude_leaf':
-            # Exclude leaf segments (only show segments that ARE parents to other segments)
-            # Get all codes that are referenced as parent_code
-            parent_codes = XX_Segment.objects.filter(
-                segment_type=segment_type_obj,
-                parent_code__isnull=False
-            ).exclude(parent_code='').values_list('parent_code', flat=True).distinct()
-            
-            # Only include segments whose code DOES appear as a parent
-            segments = segments.filter(code__in=parent_codes)
-        
-        elif filter_type == 'exclude_root':
-            # Exclude root segments (only show non-root segments with level > 0)
-            segments = segments.exclude(level=0)
-        
-        elif filter_type == 'all':
-            # All segments - no additional filter needed (default)
-            pass
-        
-        else:
-            # Invalid filter type, default to all
-            pass
-
-        # Order by code
-        segments = segments.order_by("code")
-
-        # Apply search filter on both code and alias
-        if search_query:
-            segments = segments.filter(
-                Q(code__icontains=search_query) | 
-                Q(alias__icontains=search_query)
-            )
-
-        # Use the new SegmentValueListSerializer
-        serializer = SegmentValueListSerializer(segments, many=True)
-
-        return Response(
-            {
-                "message": f"{segment_type_obj.segment_name} retrieved successfully.", 
-                "data": serializer.data,
-                "segment_type": segment_type_obj.segment_name,
-                "segment_type_id": segment_type_obj.segment_id,
-                "filter_applied": filter_type,
-                "total_count": segments.count()
-            }
-        )
-
+################################################################################# Segment types are now stored in XX_SegmentType table##############################################################
 class SegmentTypesListView(APIView):
     """List all available segment types in the system
     
@@ -251,7 +118,11 @@ class SegmentTypeCreateView(APIView):
     
     def post(self, request):
         segment_name = request.data.get("segment_name")
-        
+        oracle_segment_number=request.data.get("oracle_segment_number")
+        is_required=request.data.get("is_required", True)
+        has_hierarchy=request.data.get("has_hierarchy", False)
+        display_order=request.data.get("display_order", 0)
+        description=request.data.get("description")
         if not segment_name:
             return Response(
                 {
@@ -278,11 +149,15 @@ class SegmentTypeCreateView(APIView):
                 status=status.HTTP_409_CONFLICT
             )
         
-        # Create the segment type
+        
         try:
             segment_type = XX_SegmentType.objects.create(
                 segment_name=segment_name,
-                description=request.data.get("description")
+                description=description,
+                oracle_segment_number=oracle_segment_number,
+                is_required=is_required,
+                has_hierarchy=has_hierarchy,
+                display_order=display_order
             )
             
             return Response(
@@ -296,6 +171,7 @@ class SegmentTypeCreateView(APIView):
                 },
                 status=status.HTTP_201_CREATED
             )
+        
         except Exception as e:
             return Response(
                 {
@@ -447,6 +323,176 @@ class SegmentTypeDeleteView(APIView):
             status=status.HTTP_200_OK
         )
 
+class SegmentTypeDeleteAllView(APIView):
+    """Delete all segment types and their associated segments
+    
+    WARNING: This will delete ALL segment types and ALL segments in the system.
+    Use with extreme caution.
+    """
+
+    permission_classes = [IsAuthenticated]
+
+    def delete(self, request):
+        from account_and_entitys.models import XX_BalanceReportSegment
+        
+        total_segment_types = XX_SegmentType.objects.count()
+        total_balance_segments = XX_BalanceReportSegment.objects.count()
+
+        # Delete in correct order to handle PROTECT foreign keys:
+        # 1. Delete XX_BalanceReportSegment (has PROTECT FKs to SegmentType and Segment)
+        # 2. Delete XX_Segment (has PROTECT FKs from BalanceReportSegment)
+        # 3. Delete XX_SegmentType (has PROTECT FKs from BalanceReportSegment)
+        XX_BalanceReportSegment.objects.all().delete()
+        XX_Segment.objects.all().delete()
+        XX_SegmentType.objects.all().delete()
+
+        return Response(
+            {
+                "message": "All segment types, segments, and balance report segments have been deleted successfully.",
+                "total_segment_types_deleted": total_segment_types,
+                "total_balance_segments_deleted": total_balance_segments,
+            },
+            status=status.HTTP_200_OK
+        )
+# Segment are now stored in XX_Segment_XX table
+
+##################################################################################### Fully dynamic segment view##############################################################
+
+class SegmentListView(APIView):
+    """Fully dynamic view to list segments based on configured segment types in XX_SegmentType table
+    
+    Works with any number of segment types (not limited to 3) and retrieves segment type info dynamically.
+    
+    Query Parameters:
+    - segment_type: REQUIRED - Segment type ID to retrieve (from XX_SegmentType table)
+                    Can also use segment_name (e.g., 'Entity', 'Account', 'Project', or any custom type)
+    - search: Filter by code or alias (optional)
+    - filter: Segment filter type (optional, default='all')
+        * 'all': All segments regardless of level (default)
+        * 'root' or 'zero_level': Only root segments (level=0)
+        * 'leaf' or 'children': Only leaf segments (segments with no children)
+        * 'exclude_leaf': All segments except leaf segments (only parents)
+        * 'exclude_root': All segments except root segments (only non-root)
+    """
+
+    permission_classes = [IsAuthenticated]
+    pagination_class = EntityPagination
+
+    def get(self, request):
+        search_query = request.query_params.get("search", None)
+        filter_type = request.query_params.get("filter", "all").lower()
+        segment_type_param = request.query_params.get("segment_type", None)
+
+        # Validate segment_type parameter
+        if not segment_type_param:
+            # Get available segment types for error message
+            available_types = XX_SegmentType.objects.all().values('segment_id', 'segment_name')
+            types_list = [f"{t['segment_id']}={t['segment_name']}" for t in available_types]
+            
+            return Response(
+                {
+                    "message": "segment_type parameter is required.",
+                    "available_segment_types": types_list,
+                    "data": []
+                },
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        # Try to find segment type by ID or by name
+        segment_type_obj = None
+        
+        # First try as ID (integer)
+        try:
+            segment_type_id = int(segment_type_param)
+            segment_type_obj = XX_SegmentType.objects.filter(segment_id=segment_type_id).first()
+        except (ValueError, TypeError):
+            # If not an integer, try as name
+            segment_type_obj = XX_SegmentType.objects.filter(
+                segment_name__iexact=segment_type_param
+            ).first()
+        
+        # If still not found, return error with available types
+        if not segment_type_obj:
+            available_types = XX_SegmentType.objects.all().values('segment_id', 'segment_name')
+            types_list = [f"{t['segment_id']}={t['segment_name']}" for t in available_types]
+            
+            return Response(
+                {
+                    "message": f"Invalid segment_type '{segment_type_param}'. Not found in configured segment types.",
+                    "available_segment_types": types_list,
+                    "data": []
+                },
+                status=status.HTTP_404_NOT_FOUND
+            )
+
+        # Start with base query for segments
+        segments = XX_Segment.objects.filter(
+            segment_type=segment_type_obj,
+            is_active=True
+        )
+
+        # Apply filter based on filter_type parameter
+        if filter_type in ['root', 'zero_level']:
+            # Only root segments (level=0)
+            segments = segments.filter(level=0)
+        
+        elif filter_type in ['leaf', 'children']:
+            # Only leaf segments (segments that are not parents to any other segment)
+            # Get all codes that are referenced as parent_code
+            parent_codes = XX_Segment.objects.filter(
+                segment_type=segment_type_obj,
+                parent_code__isnull=False
+            ).exclude(parent_code='').values_list('parent_code', flat=True).distinct()
+            
+            # Only include segments whose code does NOT appear as a parent
+            segments = segments.exclude(code__in=parent_codes)
+        
+        elif filter_type == 'exclude_leaf':
+            # Exclude leaf segments (only show segments that ARE parents to other segments)
+            # Get all codes that are referenced as parent_code
+            parent_codes = XX_Segment.objects.filter(
+                segment_type=segment_type_obj,
+                parent_code__isnull=False
+            ).exclude(parent_code='').values_list('parent_code', flat=True).distinct()
+            
+            # Only include segments whose code DOES appear as a parent
+            segments = segments.filter(code__in=parent_codes)
+        
+        elif filter_type == 'exclude_root':
+            # Exclude root segments (only show non-root segments with level > 0)
+            segments = segments.exclude(level=0)
+        
+        elif filter_type == 'all':
+            # All segments - no additional filter needed (default)
+            pass
+        
+        else:
+            # Invalid filter type, default to all
+            pass
+
+        # Order by code
+        segments = segments.order_by("code")
+
+        # Apply search filter on both code and alias
+        if search_query:
+            segments = segments.filter(
+                Q(code__icontains=search_query) | 
+                Q(alias__icontains=search_query)
+            )
+
+        # Use the new SegmentValueListSerializer
+        serializer = SegmentValueListSerializer(segments, many=True)
+
+        return Response(
+            {
+                "message": f"{segment_type_obj.segment_name} retrieved successfully.", 
+                "data": serializer.data,
+                "segment_type": segment_type_obj.segment_name,
+                "segment_type_id": segment_type_obj.segment_id,
+                "filter_applied": filter_type,
+                "total_count": segments.count()
+            }
+        )
 
 class SegmentCreateView(APIView):
     """Unified dynamic view to create segments for any segment type
@@ -528,7 +574,7 @@ class SegmentCreateView(APIView):
             return Response(
                 {
                     "message": f"Segment with code '{code}' already exists for segment type '{segment_type_obj.segment_name}'.",
-                    "existing_segment": SegmentValueListSerializer(existing_segment).data
+                    # "existing_segment": SegmentValueListSerializer(existing_segment).data
                 },
                 status=status.HTTP_409_CONFLICT
             )
@@ -607,7 +653,6 @@ class SegmentCreateView(APIView):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-
 class SegmentDetailView(APIView):
     """Unified dynamic view to retrieve a specific segment by ID
     
@@ -634,7 +679,6 @@ class SegmentDetailView(APIView):
                 "segment_type_id": segment.segment_type.segment_id,
             }
         )
-
 
 class SegmentUpdateView(APIView):
     """Unified dynamic view to update a specific segment
@@ -745,7 +789,6 @@ class SegmentUpdateView(APIView):
                 status=status.HTTP_400_BAD_REQUEST
             )
 
-
 class SegmentDeleteView(APIView):
     """Unified dynamic view to delete a specific segment
     
@@ -791,8 +834,38 @@ class SegmentDeleteView(APIView):
             status=status.HTTP_200_OK
         )
 
+class SegmentDeleteAllView(APIView):
+    """Delete all segment types and their associated segments
+    
+    WARNING: This will delete ALL segment types and ALL segments in the system.
+    Use with extreme caution.
+    """
 
+    permission_classes = [IsAuthenticated]
+
+    def delete(self, request):
+        from account_and_entitys.models import XX_BalanceReportSegment
+        
+        total_segment = XX_Segment.objects.count()
+        total_balance_segments = XX_BalanceReportSegment.objects.count()
+
+        # Delete in correct order to handle PROTECT foreign keys:
+        # 1. Delete XX_BalanceReportSegment (has PROTECT FK to Segment)
+        # 2. Delete XX_Segment
+        XX_BalanceReportSegment.objects.all().delete()
+        XX_Segment.objects.all().delete()
+
+        return Response(
+            {
+                "message": "All segments and balance report segments have been deleted successfully.",
+                "total_segments_deleted": total_segment,
+                "total_balance_segments_deleted": total_balance_segments,
+            },
+            status=status.HTTP_200_OK
+        )
+    
 class SegmentBulkUploadView(APIView):
+    
     """Unified dynamic bulk upload for any segment type via Excel file
     
     Expects:
@@ -1008,8 +1081,30 @@ class SegmentBulkUploadView(APIView):
                 },
                 status=status.HTTP_400_BAD_REQUEST,
             )
+        
+class Download_segment_values_from_oracle(APIView):
+    """Download segment values from Oracle and update local XX_Segment table dynamically
+    
+    Query Parameters:
+    - segment_type: REQUIRED - Segment type ID or name (e.g., 1, 2, 3, "Account", "Project")
+    
+    Features:
+    - Works with any segment type (not limited to 3)
+    - Fetches segments from Oracle via stored procedure
+    - Upserts segments into local XX_Segment table
+    """
 
+    permission_classes = [IsAuthenticated]
 
+    def get(self, request):
+       
+        oracle_maanger=OracleBalanceReportManager()
+
+        oracle_maanger.download_segment_values_and_load_to_database(1)
+        
+    
+
+        return Response("done")
 
 
 # PivotFund views
@@ -2394,8 +2489,6 @@ class Upload_ProjectEnvelopeView(APIView):
                 {"status": "error", "message": str(e)},
                 status=status.HTTP_400_BAD_REQUEST,
             )
-
-
 class ProjectEnvelopeListView(APIView):
     """List all Projects with optional search"""
 
@@ -2442,8 +2535,6 @@ class ProjectEnvelopeListView(APIView):
         return Response(
             {"message": "Projects retrieved successfully.", "data": serializer.data}
         )
-
-
 class UploadBudgetDataView(APIView):
     """Upload budget data via Excel file"""
 
@@ -2597,8 +2688,6 @@ class UploadBudgetDataView(APIView):
                 {"status": "error", "message": str(e)},
                 status=status.HTTP_400_BAD_REQUEST,
             )
-
-
 class ActiveProjectsWithEnvelopeView(APIView):
     """Return active projects with their current envelope and totals."""
 
@@ -2666,8 +2755,6 @@ class ActiveProjectsWithEnvelopeView(APIView):
                     "data": transformed_data,
                 }
             )
-
-
 class ProjectWiseDashboardView(APIView):
     """Project-wise dashboard data"""
 
@@ -2687,8 +2774,6 @@ class ProjectWiseDashboardView(APIView):
                 "data": results,
             }
         )
-
-
 class AccountWiseDashboardView(APIView):
     """Account-wise dashboard data"""
 
@@ -2713,11 +2798,7 @@ class AccountWiseDashboardView(APIView):
                 "data": results,
             }
         )
-
-
 # Mapping
-
-
 class UploadMappingExcelView(APIView):
     """
     Upload Excel file with Account and Entity mapping data.
@@ -3037,3 +3118,5 @@ class EntityMappingListView(APIView):
         return Response(
             {"message": "Entity mappings retrieved successfully.", "data": data}
         )
+
+

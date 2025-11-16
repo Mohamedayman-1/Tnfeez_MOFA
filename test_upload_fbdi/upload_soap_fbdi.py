@@ -13,9 +13,9 @@ BASE_URL = os.getenv("FUSION_BASE_URL").rstrip("/")
 USER = os.getenv("FUSION_USER")
 PASS = os.getenv("FUSION_PASS")
 
-DATA_ACCESS_SET_ID = os.getenv("FUSION_DAS_ID")
-LEDGER_ID = os.getenv("FUSION_LEDGER_ID")
-SOURCE_NAME = os.getenv("FUSION_SOURCE_NAME", "Manual")
+DATA_ACCESS_SET_ID = os.getenv("ORACLE_ACCESS_SET")
+LEDGER_ID = os.getenv("ORACLE_LEDGER_ID")
+SOURCE_NAME = os.getenv("ORACLE_JOURNAL_SOURCE", "Manual")
 
 def b64_csv(csv_path: str) -> str:
     """Read CSV file and encode in base64"""
@@ -75,10 +75,10 @@ def upload_fbdi_to_oracle(csv_file_path: str, group_id: str = None) -> dict:
     BASE_URL = os.getenv("FUSION_BASE_URL")
     USER = os.getenv("FUSION_USER") 
     PASS = os.getenv("FUSION_PASS")
-    DATA_ACCESS_SET_ID = os.getenv("FUSION_DAS_ID")
-    LEDGER_ID = os.getenv("FUSION_LEDGER_ID")
-    SOURCE_NAME = os.getenv("FUSION_SOURCE_NAME", "Manual")
-    
+    DATA_ACCESS_SET_ID = os.getenv("ORACLE_ACCESS_SET")
+    LEDGER_ID = os.getenv("ORACLE_LEDGER_ID")
+    SOURCE_NAME = os.getenv("ORACLE_JOURNAL_SOURCE", "Manual")
+    ENCUMBRANCE_TYPE_ID = os.getenv("ENCUMBRANCE_TYPE_ID", "300000035858125")
     # Sanity checks
     for k, v in {
         "FUSION_BASE_URL": BASE_URL,
@@ -116,7 +116,9 @@ def upload_fbdi_to_oracle(csv_file_path: str, group_id: str = None) -> dict:
         
         # Determine SOAP endpoint
         if BASE_URL:
-            soap_url = BASE_URL.replace("/fscmRestApi/resources/11.13.18.05", "/fscmService/ErpIntegrationService")
+            BASE_URL+= "/fscmService/ErpIntegrationService"
+            soap_url = BASE_URL
+
         else:
             return {"success": False, "error": "FUSION_BASE_URL not configured"}
         

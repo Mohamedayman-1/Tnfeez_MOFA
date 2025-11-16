@@ -1,7 +1,9 @@
 from django.urls import path
 from .views import (
     # Unified Dynamic Segment Views
+    SegmentDeleteAllView,
     SegmentListView,
+    SegmentTypeDeleteAllView,
     SegmentTypesListView,
     SegmentTypeCreateView,
     SegmentTypeDetailView,
@@ -11,7 +13,8 @@ from .views import (
     SegmentDetailView,
     SegmentUpdateView,
     SegmentDeleteView,
-    SegmentBulkUploadView,  
+    SegmentBulkUploadView,
+    Download_segment_values_from_oracle,
     AccountWiseDashboardView,
     PivotFundListView,
     PivotFundCreateView,
@@ -64,21 +67,7 @@ urlpatterns = [
     # UNIFIED DYNAMIC SEGMENT API
     # ============================================
     # Segment Type Management (CRUD for segment types)
-    path("segment-types/", SegmentTypesListView.as_view(), name="segment-types-list"),
-    path("segment-types/create/", SegmentTypeCreateView.as_view(), name="segment-type-create"),
-    path("segment-types/<int:pk>/", SegmentTypeDetailView.as_view(), name="segment-type-detail"),
-    path("segment-types/<int:pk>/update/", SegmentTypeUpdateView.as_view(), name="segment-type-update"),
-    path("segment-types/<int:pk>/delete/", SegmentTypeDeleteView.as_view(), name="segment-type-delete"),
-    
-    # Main unified CRUD endpoints for all segment types
-    path("segments/", SegmentListView.as_view(), name="segment-list"),
-    path("segments/create/", SegmentCreateView.as_view(), name="segment-create"),
-    path("segments/<int:pk>/", SegmentDetailView.as_view(), name="segment-detail"),
-    path("segments/<int:pk>/update/", SegmentUpdateView.as_view(), name="segment-update"),
-    path("segments/<int:pk>/delete/", SegmentDeleteView.as_view(), name="segment-delete"),
-    
-    # Unified bulk upload endpoint (works with any segment type)
-    path("segments/upload/", SegmentBulkUploadView.as_view(), name="segment-bulk-upload"),
+ 
     
     # ============================================
     # LEGACY ENDPOINTS (For backward compatibility)
@@ -265,4 +254,34 @@ urlpatterns = [
     path("phase3/transfer-limits/", SegmentTransferLimitListCreateView.as_view(), name="transfer-limit-list-create"),
     path("phase3/transfer-limits/<int:limit_id>/", SegmentTransferLimitDetailView.as_view(), name="transfer-limit-detail"),
     path("phase3/transfer-limits/validate/", SegmentTransferLimitValidateView.as_view(), name="transfer-limit-validate"),
+
+    path(
+        "segment-types/delete-all/",
+        SegmentTypeDeleteAllView.as_view(),
+        name="segment-type-delete-all",
+    ),
+    path(
+        "segments/delete-all/",
+        SegmentDeleteAllView.as_view(),
+        name="segment-delete-all",
+    ),
+
+
+    path("segment-types/", SegmentTypesListView.as_view(), name="segment-types-list"),
+    path("segment-types/create/", SegmentTypeCreateView.as_view(), name="segment-type-create"),
+    path("segment-types/<int:pk>/", SegmentTypeDetailView.as_view(), name="segment-type-detail"),
+    path("segment-types/<int:pk>/update/", SegmentTypeUpdateView.as_view(), name="segment-type-update"),
+    path("segment-types/<int:pk>/delete/", SegmentTypeDeleteView.as_view(), name="segment-type-delete"),
+
+    path("segments/load_from_oracle/", Download_segment_values_from_oracle.as_view(), name="segment-create"),
+    
+    # Main unified CRUD endpoints for all segment types
+    path("segments/", SegmentListView.as_view(), name="segment-list"),
+    path("segments/create/", SegmentCreateView.as_view(), name="segment-create"),
+    path("segments/<int:pk>/", SegmentDetailView.as_view(), name="segment-detail"),
+    path("segments/<int:pk>/update/", SegmentUpdateView.as_view(), name="segment-update"),
+    path("segments/<int:pk>/delete/", SegmentDeleteView.as_view(), name="segment-delete"),
+    
+    # Unified bulk upload endpoint (works with any segment type)
+    path("segments/upload/", SegmentBulkUploadView.as_view(), name="segment-bulk-upload"),
 ]

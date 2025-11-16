@@ -1,3 +1,4 @@
+import os
 import pandas as pd
 import openpyxl
 from openpyxl import load_workbook
@@ -232,6 +233,12 @@ def create_sample_journal_data(
     journal_name = f"JOURNAL_TRANSFER_{timestamp} transaction id={transaction_id}"
     journal_description = f"Journal Entry for Balance Transfer - Created {time.strftime('%Y-%m-%d %H:%M:%S')}"
 
+
+    CURRENCY_CODE=os.getenv("ORACLE_CURRENCY_CODE","AED")
+    LEDGER_ID=os.getenv("ORACLE_LEDGER_ID","300000205309206")
+    ORACLE_EFFECTIVE_DATE=os.getenv("ORACLE_EFFECTIVE_DATE","2025-09-26")
+    ORACLE_JOURNAL_SOURCE=os.getenv("ORACLE_JOURNAL_SOURCE","Allocations")
+    ENCUMBRANCE_TYPE_ID=os.getenv("ENCUMBRANCE_TYPE_ID","300000035858125")
     sample_data = []
     total_debit = 0
     
@@ -248,12 +255,12 @@ def create_sample_journal_data(
             # Base journal entry data (non-segment fields)
             journal_entry = {
                 "Status Code": "NEW",
-                "Ledger ID": "300000205309206",
-                "Effective Date of Transaction": "2025-09-26",
-                "Journal Source": "Allocations",
-                "Journal Category": "Adjustment",
-                "Currency Code": "AED",
-                "Journal Entry Creation Date": "2025-09-26",
+                "Ledger ID": LEDGER_ID,
+                "Effective Date of Transaction": ORACLE_EFFECTIVE_DATE,
+                "Journal Source": ORACLE_JOURNAL_SOURCE,
+                "Journal Category": "حجز من ميزانية السيولة",
+                "Currency Code": CURRENCY_CODE,
+                "Journal Entry Creation Date": time.strftime("%Y-%m-%d"),
                 "Actual Flag": "E",
                 "Entered Debit Amount": (
                     from_amount if type == "submit" else ""
@@ -266,7 +273,7 @@ def create_sample_journal_data(
                 "REFERENCE4 (Journal Entry Name)": journal_name,
                 "REFERENCE5 (Journal Entry Description)": journal_description,
                 "REFERENCE10 (Journal Entry Line Description)": f"Debit transcation {transfer.transaction_id} transfer line {transfer.transfer_id}",
-                "Encumbrance Type ID": "100000243328511",
+                "Encumbrance Type ID": ENCUMBRANCE_TYPE_ID,
                 "Interface Group Identifier": group_id,
             }
             
@@ -289,12 +296,12 @@ def create_sample_journal_data(
         # Base offsetting entry
         offsetting_entry = {
             "Status Code": "NEW",
-            "Ledger ID": "300000205309206",
-            "Effective Date of Transaction": "2025-09-17",
-            "Journal Source": "Allocations",
-            "Journal Category": "Adjustment",
-            "Currency Code": "AED",
-            "Journal Entry Creation Date": "2025-09-17",
+            "Ledger ID": LEDGER_ID,
+            "Effective Date of Transaction": ORACLE_EFFECTIVE_DATE,
+            "Journal Source": ORACLE_JOURNAL_SOURCE,
+            "Journal Category": "حجز من ميزانية السيولة",
+            "Currency Code": CURRENCY_CODE,
+            "Journal Entry Creation Date": time.strftime("%Y-%m-%d"),
             "Actual Flag": "E",
             "Entered Debit Amount": total_debit if type == "reject" else "",
             "Entered Credit Amount": total_debit if type == "submit" else "",
@@ -303,7 +310,7 @@ def create_sample_journal_data(
             "REFERENCE4 (Journal Entry Name)": journal_name,
             "REFERENCE5 (Journal Entry Description)": journal_description,
             "REFERENCE10 (Journal Entry Line Description)": "Offsetting credit line for balance transfer",
-            "Encumbrance Type ID": "100000243328511",
+            "Encumbrance Type ID": ENCUMBRANCE_TYPE_ID,
             "Interface Group Identifier": group_id,
         }
         

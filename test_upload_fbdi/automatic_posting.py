@@ -111,8 +111,15 @@ def submit_automatic_posting(ledger_id: str = "300000312635883") -> str:
     Returns:
         str: JobRequestId of the submitted job
     """
-    base_url, user, pwd = load_env()
-    endpoint = f"{base_url}/fscmService/ErpIntegrationService"
+    load_dotenv()
+    BASE_URL = os.getenv("FUSION_BASE_URL")
+    USER = os.getenv("FUSION_USER") 
+    PASS = os.getenv("FUSION_PASS")
+    DATA_ACCESS_SET_ID = os.getenv("ORACLE_ACCESS_SET")
+    LEDGER_ID = os.getenv("ORACLE_LEDGER_ID")
+    SOURCE_NAME = os.getenv("ORACLE_JOURNAL_SOURCE", "Manual")
+    ENCUMBRANCE_TYPE_ID = os.getenv("ENCUMBRANCE_TYPE_ID", "300000035858125")
+    endpoint = f"{BASE_URL}/fscmService/ErpIntegrationService"
 
     xml = f"""<soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/" xmlns:typ="http://xmlns.oracle.com/apps/financials/commonModules/shared/model/erpIntegrationService/types/">
    <soapenv:Header/>
@@ -121,14 +128,14 @@ def submit_automatic_posting(ledger_id: str = "300000312635883") -> str:
          <typ:jobPackageName>/oracle/apps/ess/financials/generalLedger/programs/common/</typ:jobPackageName>
          <typ:jobDefinitionName>AutomaticPosting</typ:jobDefinitionName>
          <!--Zero or more repetitions:-->
-         <typ:paramList>{ledger_id}</typ:paramList>
+         <typ:paramList>{LEDGER_ID}</typ:paramList>
          <typ:paramList></typ:paramList>
       </typ:submitESSJobRequest>
    </soapenv:Body>
 </soapenv:Envelope>"""
 
     print(f"🔄 Submitting Automatic Posting for Ledger ID: {ledger_id}")
-    r = post_soap(endpoint, user, pwd, xml)
+    r = post_soap(endpoint, USER, PASS, xml)
 
     if r.status_code != 200:
         raise SystemExit(

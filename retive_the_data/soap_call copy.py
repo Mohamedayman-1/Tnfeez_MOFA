@@ -231,6 +231,9 @@ def get_report(control_budget_name):
         print(f"❌ Error downloading report: {str(e)}")
         return False
 
+
+
+
 if __name__ == "__main__":
     # Run the complete process: download and load to database
     get_report_and_load_to_database(control_budget_name="MIC_HQ_MONTHLY")
