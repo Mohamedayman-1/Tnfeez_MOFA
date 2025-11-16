@@ -115,11 +115,9 @@ def submit_automatic_posting(ledger_id: str = "300000312635883") -> str:
     BASE_URL = os.getenv("FUSION_BASE_URL")
     USER = os.getenv("FUSION_USER") 
     PASS = os.getenv("FUSION_PASS")
-    DATA_ACCESS_SET_ID = os.getenv("ORACLE_ACCESS_SET")
     LEDGER_ID = os.getenv("ORACLE_LEDGER_ID")
-    SOURCE_NAME = os.getenv("ORACLE_JOURNAL_SOURCE", "Manual")
-    ENCUMBRANCE_TYPE_ID = os.getenv("ENCUMBRANCE_TYPE_ID", "300000035858125")
     endpoint = f"{BASE_URL}/fscmService/ErpIntegrationService"
+    
 
     xml = f"""<soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/" xmlns:typ="http://xmlns.oracle.com/apps/financials/commonModules/shared/model/erpIntegrationService/types/">
    <soapenv:Header/>
@@ -160,7 +158,7 @@ if __name__ == "__main__":
     print("=" * 50)
 
     # You can change the ledger ID here or pass it as parameter
-    job_id = submit_automatic_posting("300000306553329")
+    job_id = submit_automatic_posting("300000006508245")
 
     print(f"\n🎉 Automatic Posting job submitted with ID: {job_id}")
     print(

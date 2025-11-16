@@ -36,20 +36,20 @@ class OracleSegmentMapper:
             segment_type_or_id: XX_SegmentType instance or segment_id (int)
             
         Returns:
-            str: Oracle field name like 'SEGMENT1', 'SEGMENT2', etc.
+            str: Oracle field name like 'Segment1', 'Segment2', etc.
             
         Example:
             >>> OracleSegmentMapper.get_oracle_field_name(1)
-            'SEGMENT1'
+            'Segment1'
             >>> OracleSegmentMapper.get_oracle_field_name(entity_type)
-            'SEGMENT1'
+            'Segment1'
         """
         if isinstance(segment_type_or_id, int):
             segment_type = XX_SegmentType.objects.get(segment_id=segment_type_or_id)
         else:
             segment_type = segment_type_or_id
         
-        return f"SEGMENT{segment_type.oracle_segment_number}"
+        return f"Segment{segment_type.oracle_segment_number}"
     
     @staticmethod
     def get_oracle_field_number(segment_type_or_id) -> int:
@@ -147,9 +147,9 @@ class OracleSegmentMapper:
             num_segments: Number of segments to generate (default 30)
             
         Returns:
-            list: ['SEGMENT1', 'SEGMENT2', ..., 'SEGMENT30']
+            list: ['Segment1', 'Segment2', ..., 'Segment30']
         """
-        return [f'SEGMENT{i}' for i in range(1, num_segments + 1)]
+        return [f'Segment{i}' for i in range(1, num_segments + 1)]
     
     @staticmethod
     def get_active_oracle_fields() -> List[str]:
@@ -186,7 +186,7 @@ class OracleSegmentMapper:
         
         # Iterate through all possible segment fields
         for oracle_num in range(1, 31):
-            oracle_field = f'SEGMENT{oracle_num}'
+            oracle_field = f'Segment{oracle_num}'
             
             if oracle_field in oracle_record:
                 value = oracle_record[oracle_field]
@@ -320,7 +320,7 @@ class OracleSegmentMapper:
         
         # Fill remaining segments with empty/None values for unused segments
         for i in range(1, 31):
-            segment_field = f'SEGMENT{i}'
+            segment_field = f'Segment{i}'
             if segment_field not in fbdi_row:
                 ## get defualt values from segments
                 value=XX_Segment.objects.filter(segment_type=i,is_active=True).first()

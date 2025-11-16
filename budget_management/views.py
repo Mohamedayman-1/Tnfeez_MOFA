@@ -53,8 +53,8 @@ from rest_framework.response import Response
 from rest_framework import status
 from rest_framework.permissions import IsAuthenticated
 from django.db.models import Q, Sum, Count, Case, When, Value, F
-from test_upload_fbdi.utility.creat_and_upload import submint_journal_and_upload
-from test_upload_fbdi.utility.submit_budget_and_upload import submit_budget_and_upload
+from oracle_fbdi_integration.utilities.journal_integration import create_and_upload_journal
+from oracle_fbdi_integration.utilities.budget_integration import create_and_upload_budget
 
 
 class TransferPagination(PageNumberPagination):
@@ -747,10 +747,10 @@ class transcationtransferapprovel_reject(APIView):
 
                         if Status == "approved":
                             if trasncation.code[0:3] != "AFR":
-                                csv_upload_result, result = submint_journal_and_upload(
+                                csv_upload_result, result = create_and_upload_journal(
                                     transfers=trasfers,
                                     transaction_id=transaction_id,
-                                    type="reject",
+                                    entry_type="reject",
                                 )
                                 response_data = {
                                     "message": "Transfers submitted for approval successfully",
@@ -773,7 +773,7 @@ class transcationtransferapprovel_reject(APIView):
                             time.sleep(
                                 10
                             )  # wait for 10 seconds before submitting budget
-                            csv_upload_result, result = submit_budget_and_upload(
+                            csv_upload_result, result = create_and_upload_budget(
                                 transfers=trasfers,
                                 transaction_id=transaction_id,
                             )
@@ -782,10 +782,10 @@ class transcationtransferapprovel_reject(APIView):
                         #   continue
                         if Status == "rejected":
                             if trasncation.code[0:3] != "AFR":
-                                csv_upload_result, result = submint_journal_and_upload(
+                                csv_upload_result, result = create_and_upload_journal(
                                     transfers=trasfers,
                                     transaction_id=transaction_id,
-                                    type="reject",
+                                    entry_type="reject",
                                 )
                                 time.sleep(90)
                                 submit_automatic_posting("300000312635883")

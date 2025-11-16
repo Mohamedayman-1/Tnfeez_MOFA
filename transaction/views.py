@@ -36,19 +36,19 @@ from pathlib import Path
 from django.conf import settings
 import difflib
 import string
-from test_upload_fbdi.journal_template_manager import (
-    create_sample_journal_data,
-    create_journal_from_scratch,
+from oracle_fbdi_integration.core.journal_manager import (
+    create_journal_entry_data,
+    JournalTemplateManager,
 )
-from test_upload_fbdi.upload_soap_fbdi import (
-    b64_csv,
-    build_soap_envelope,
-    upload_fbdi_to_oracle,
+from oracle_fbdi_integration.core.upload_manager import (
+    encode_csv_to_base64,
+    build_journal_soap_envelope,
+    upload_journal_fbdi,
 )
 from account_and_entitys.utils import get_oracle_report_data  # Legacy - deprecated
 from account_and_entitys.oracle import OracleBalanceReportManager, OracleSegmentMapper
-from test_upload_fbdi.utility.creat_and_upload import submint_journal_and_upload
-from test_upload_fbdi.utility.submit_budget_and_upload import submit_budget_and_upload
+from oracle_fbdi_integration.utilities.journal_integration import create_and_upload_journal
+from oracle_fbdi_integration.utilities.budget_integration import create_and_upload_budget
 from test_upload_fbdi.automatic_posting import submit_automatic_posting
 
 
@@ -1127,7 +1127,7 @@ class transcationtransferSubmit(APIView):
                     )
 
                 if code[0:3] != "AFR":
-                    csv_upload_result, result = submint_journal_and_upload(transfers=transfers,transaction_id=transaction_id,type="submit")
+                    csv_upload_result, result = create_and_upload_journal(transfers=transfers,transaction_id=transaction_id,entry_type="submit")
                     if csv_upload_result.get("success"):
                         time.sleep(90)
                         submit_automatic_posting("300000312635883")

@@ -468,13 +468,13 @@ class OracleBalanceReportManager:
                 excel_data = base64.b64decode(report_bytes_element.text)
                 print(f"   ✅ Downloaded Excel file ({len(excel_data)} bytes)")
                 
-                # Load Excel into DataFrame (in memory)
-                df = pd.read_excel(io.BytesIO(excel_data), engine='openpyxl')
+                # Load Excel into DataFrame (in memory) - read VALUE column as string to preserve leading zeros
+                df = pd.read_excel(io.BytesIO(excel_data), engine='openpyxl', dtype={'VALUE': str})
 
                 
                 # Check if first row is header
                 if len(df) > 0 and df.iloc[0, 0] == 'VALUE_SET_CODE':
-                    df = pd.read_excel(io.BytesIO(excel_data), header=1, engine='openpyxl')
+                    df = pd.read_excel(io.BytesIO(excel_data), header=1, engine='openpyxl', dtype={'VALUE': str})
                 
                 # Clean column names
                 df.columns = df.columns.str.strip()
@@ -544,20 +544,23 @@ class OracleBalanceReportManager:
                     end_date_str = end_date.strftime("%d-%m-%Y") if end_date else None
                     
                     if value and str(value).strip():
-                        all_segment_values.add(str(value).strip())
+                        # Value is already read as string from Excel (preserving leading zeros)
+                        value_str = str(value).strip()
+                        
+                        all_segment_values.add(value_str)
                         code = ""
                         parent_code = None
                         level = 0
                         segment_type = None
 
                         if control_budget == control_budget_names[0]:
-                            code = str(value).strip()
+                            code = value_str
                             segment_type=11
                         elif control_budget == control_budget_names[1]:
-                            code = str(value).strip()
+                            code = value_str
                             segment_type=9
                         elif control_budget == control_budget_names[2]:
-                            code = str(value).strip()
+                            code = value_str
                             segment_type=5
 
                         try:

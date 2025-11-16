@@ -1,0 +1,8 @@
+# Ignore all generated files
+*.xlsm
+*.xlsx
+*.csv
+*.zip
+
+# Keep directory structure
+!.gitignore
