@@ -101,7 +101,7 @@ def parse_fault_and_vals(resp_text: str):
     return None, vals
 
 
-def submit_automatic_posting(ledger_id: str = "300000312635883") -> str:
+def submit_automatic_posting() -> str:
     """
     Submit Automatic Posting job for General Ledger
 
@@ -115,7 +115,7 @@ def submit_automatic_posting(ledger_id: str = "300000312635883") -> str:
     BASE_URL = os.getenv("FUSION_BASE_URL")
     USER = os.getenv("FUSION_USER") 
     PASS = os.getenv("FUSION_PASS")
-    LEDGER_ID = os.getenv("ORACLE_LEDGER_ID")
+    AUTOPOST_ID = os.getenv("AUTOPOST_ID")
     endpoint = f"{BASE_URL}/fscmService/ErpIntegrationService"
     
 
@@ -126,13 +126,12 @@ def submit_automatic_posting(ledger_id: str = "300000312635883") -> str:
          <typ:jobPackageName>/oracle/apps/ess/financials/generalLedger/programs/common/</typ:jobPackageName>
          <typ:jobDefinitionName>AutomaticPosting</typ:jobDefinitionName>
          <!--Zero or more repetitions:-->
-         <typ:paramList>{LEDGER_ID}</typ:paramList>
+         <typ:paramList>{AUTOPOST_ID}</typ:paramList>
          <typ:paramList></typ:paramList>
       </typ:submitESSJobRequest>
    </soapenv:Body>
 </soapenv:Envelope>"""
 
-    print(f"🔄 Submitting Automatic Posting for Ledger ID: {ledger_id}")
     r = post_soap(endpoint, USER, PASS, xml)
 
     if r.status_code != 200:
@@ -158,7 +157,7 @@ if __name__ == "__main__":
     print("=" * 50)
 
     # You can change the ledger ID here or pass it as parameter
-    job_id = submit_automatic_posting("300000006508245")
+    job_id = submit_automatic_posting()
 
     print(f"\n🎉 Automatic Posting job submitted with ID: {job_id}")
     print(

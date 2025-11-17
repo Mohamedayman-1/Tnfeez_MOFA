@@ -11,7 +11,9 @@ from django.db.models.functions import Cast, Coalesce
 from django.db.models import CharField
 from approvals.managers import ApprovalManager
 from approvals.models import ApprovalAction, ApprovalWorkflowInstance
-from test_upload_fbdi.automatic_posting import submit_automatic_posting
+from oracle_fbdi_integration.utilities.automatic_posting import submit_automatic_posting
+from oracle_fbdi_integration.utilities.Status import wait_for_job
+
 from user_management.models import xx_User, xx_notification
 from .models import (
     filter_budget_transfers_all_in_entities,
@@ -769,7 +771,7 @@ class transcationtransferapprovel_reject(APIView):
                                     90
                                 )  # wait for 90 seconds before submitting budget
                                 print("wait for 90 seconds")
-                            submit_automatic_posting("300000312635883")
+                            submit_automatic_posting()
                             time.sleep(
                                 10
                             )  # wait for 10 seconds before submitting budget
@@ -787,8 +789,9 @@ class transcationtransferapprovel_reject(APIView):
                                     transaction_id=transaction_id,
                                     entry_type="reject",
                                 )
+                                wait_for_job()
                                 time.sleep(90)
-                                submit_automatic_posting("300000312635883")
+                                submit_automatic_posting()
                                 response_data = {
                                     "message": "Transfers submitted for approval successfully",
                                     "transaction_id": transaction_id,

@@ -15,7 +15,8 @@ from oracle_fbdi_integration.core.journal_manager import (
 )
 from oracle_fbdi_integration.core.upload_manager import upload_journal_fbdi
 from oracle_fbdi_integration import JOURNALS_DIR, TEMPLATES_DIR
-
+from oracle_fbdi_integration.utilities.Upload_essjob_api import run_complete_workflow
+from budget_management.models import xx_BudgetTransfer
 
 def create_and_upload_journal(transfers, transaction_id: int, entry_type: str = "submit"):
     """
@@ -64,6 +65,8 @@ def create_and_upload_journal(transfers, transaction_id: int, entry_type: str = 
 
     # Upload to Oracle Fusion
     upload_result = None
+    Status="N/A"
+    Status_Detail=""
     if result_path and result_path.endswith(".zip"):
         # The CSV file should be in the same directory as the ZIP file
         zip_path = Path(result_path)
@@ -71,12 +74,17 @@ def create_and_upload_journal(transfers, transaction_id: int, entry_type: str = 
 
         if csv_path.exists():
             print(f"Uploading CSV to Oracle Fusion: {csv_path}")
-            upload_result = upload_journal_fbdi(str(csv_path), group_id)
+            
+            # Import the new workflow function
+            
+            # Run the complete 4-step workflow (UCM upload → Interface Load → Import → AutoPost)
+           
+            upload_result = run_complete_workflow(str(csv_path), Groupid=group_id, transaction_id=transaction_id)
 
             if upload_result.get("success"):
-                print(f"FBDI Upload successful! Request ID: {upload_result.get('request_id')}")
+                print(f"Complete workflow successful! All steps completed.")
             else:
-                print(f"FBDI Upload failed: {upload_result.get('error')}")
+                print(f"Workflow failed: {upload_result.get('error')}")
         else:
             print(f"CSV file not found at expected location: {csv_path}")
             upload_result = {

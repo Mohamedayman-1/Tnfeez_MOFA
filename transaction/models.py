@@ -283,3 +283,10 @@ class xx_TransactionTransfer(models.Model):
             }
         
         return SegmentManager.validate_transaction_segments(validation_data)
+
+
+
+
+
+
+

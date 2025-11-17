@@ -49,9 +49,9 @@ from account_and_entitys.utils import get_oracle_report_data  # Legacy - depreca
 from account_and_entitys.oracle import OracleBalanceReportManager, OracleSegmentMapper
 from oracle_fbdi_integration.utilities.journal_integration import create_and_upload_journal
 from oracle_fbdi_integration.utilities.budget_integration import create_and_upload_budget
-from test_upload_fbdi.automatic_posting import submit_automatic_posting
-
-
+from oracle_fbdi_integration.utilities.automatic_posting import submit_automatic_posting
+from oracle_fbdi_integration.utilities.Status import wait_for_job
+from budget_management.models import xx_BudgetTransfer
 def validate_transaction_dynamic(data, code=None):
     """
     Validate transaction transfer data with DYNAMIC SEGMENTS
@@ -1128,9 +1128,8 @@ class transcationtransferSubmit(APIView):
 
                 if code[0:3] != "AFR":
                     csv_upload_result, result = create_and_upload_journal(transfers=transfers,transaction_id=transaction_id,entry_type="submit")
+        
                     if csv_upload_result.get("success"):
-                        time.sleep(90)
-                        submit_automatic_posting("300000312635883")
                         response_data = {
                             "message": "Transfers submitted for approval successfully",
                             "transaction_id": transaction_id,
@@ -1142,8 +1141,9 @@ class transcationtransferSubmit(APIView):
                     else:
                         return Response(
                             {
-                                "error": "FBDI Upload failed",
-                                "message": f"FBDI Upload failed: {csv_upload_result.get('error')}",
+                                "Status": "Submitted failed",
+                                "Error": f"FBDI Upload failed: {csv_upload_result.get('error')}",
+                                "Status_Detail": {csv_upload_result.get('warning')},
                             },
                             status=status.HTTP_500_INTERNAL_SERVER_ERROR,
                         )

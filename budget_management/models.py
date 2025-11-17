@@ -1,9 +1,11 @@
 from pyexpat import model
 from django.db import models
 from account_and_entitys.models import XX_Account, XX_Entity, XX_Project
-# Avoid importing xx_User at module import time to prevent circular imports
+from django.db.models import Q, Count, F
+from django.db.models import Value
+from django.db.models.functions import Cast
+from django.db.models import CharField
 
-# Removed encrypted fields import - using standard Django fields now
 import json
 
 
@@ -86,10 +88,7 @@ class xx_BudgetTransfer(models.Model):
 # JOIN XX_Entity_XX ON XX_Transaction_Transfer_XX.cost_center_code = XX_Entity_XX.entity
 # WHERE XX_Entity_XX.id IN (value1, value2, ...);
 
-from django.db.models import Q, Count, F
-from django.db.models import Value
-from django.db.models.functions import Cast
-from django.db.models import CharField
+
 
 
 def get_entities_with_children(entity_ids):
@@ -369,3 +368,37 @@ class xx_DashboardBudgetTransfer(models.Model):
 
     def __str__(self):
         return f"Dashboard Data {self.Dashboard_id} from {self.date}"
+
+
+
+class xx_budget_integration_audit(models.Model):
+    """Model to track budget integration audits - supports multi-step workflows"""
+
+    audit_id = models.AutoField(primary_key=True)
+    transaction_id = models.ForeignKey(
+        xx_BudgetTransfer, on_delete=models.CASCADE, related_name="integration_audits"
+    )
+    
+    # Step identification
+    step_name = models.CharField(max_length=100)  # e.g., "UCM Upload", "Interface Loader"
+    step_number = models.IntegerField()  # 1, 2, 3, 4...
+    
+    # Step details
+    request_id = models.CharField(max_length=50, null=True, blank=True)
+    document_id = models.CharField(max_length=50, null=True, blank=True)  # For UCM uploads
+    group_id = models.CharField(max_length=50, null=True, blank=True)
+    
+    # Status tracking
+    status = models.CharField(max_length=20)  # RUNNING, SUCCEEDED, FAILED, ERROR
+    message = models.TextField(null=True, blank=True)
+    
+    # Timestamps
+    created_at = models.DateTimeField(auto_now_add=True)
+    completed_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        db_table = "XX_BUDGET_INTEGRATION_AUDIT_XX"
+        ordering = ['transaction_id', 'step_number']
+
+    def __str__(self):
+        return f"Audit {self.audit_id} - Transaction {self.transaction_id.transaction_id} - Step {self.step_number}: {self.step_name} ({self.status})"

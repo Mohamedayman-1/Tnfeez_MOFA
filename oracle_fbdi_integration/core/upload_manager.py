@@ -54,9 +54,8 @@ def build_journal_soap_envelope(
     LEDGER_ID = os.getenv("ORACLE_LEDGER_ID")
     SOURCE_NAME = os.getenv("ORACLE_JOURNAL_SOURCE", "Manual")
 
-    # Build parameter list: DataAccessSetId, SourceName, LedgerId, GroupId, 
-    # PostErrorsToSuspense, CreateSummary, ImportDFF
-    parameter_list = f"{DATA_ACCESS_SET_ID},{SOURCE_NAME},{LEDGER_ID},{group_id},N,N,N"
+    # JournalImportLauncher parameters: DataAccessSetId, SourceName, LedgerId, GroupId, PostErrorsToSuspense, CreateSummary
+    parameter_list = f"{DATA_ACCESS_SET_ID},{SOURCE_NAME},{LEDGER_ID},{group_id},N,N"
 
     callback_section = f"<typ:callbackURL>{callback_url}</typ:callbackURL>" if callback_url else ""
 
@@ -81,7 +80,7 @@ def build_journal_soap_envelope(
       </typ:importBulkDataAsync>
    </soapenv:Body>
 </soapenv:Envelope>"""
-
+    
     return soap_envelope
 
 
@@ -156,6 +155,21 @@ def upload_journal_fbdi(csv_file_path: str, group_id: Optional[str] = None) -> D
             timeout=60
         )
 
+        print(f"Response Status: {response.status_code}")
+        print(f"Response Headers: {response.headers}")
+        print(f"Response Text: {response.text}")
+
+        # Check for SOAP faults in the response
+        if '<faultcode>' in response.text or '<Fault>' in response.text or 'orafault:Fault' in response.text:
+            # Extract fault message
+            fault_match = re.search(r'<faultstring>(.*?)</faultstring>', response.text, re.DOTALL)
+            fault_message = fault_match.group(1) if fault_match else "Unknown SOAP fault"
+            return {
+                "success": False,
+                "error": f"SOAP Fault: {fault_message}",
+                "response": response.text[:1000]
+            }
+
         if response.status_code >= 400:
             return {
                 "success": False,
@@ -164,15 +178,26 @@ def upload_journal_fbdi(csv_file_path: str, group_id: Optional[str] = None) -> D
             }
 
         # Extract request ID from SOAP response
-        result_match = re.search(r'<result[^>]*>(\d+)</result>', response.text)
+        # Try multiple patterns for different Oracle services
+        result_match = re.search(r'<result[^>]*>(\d+)</result>', response.text, re.IGNORECASE)
+        if not result_match:
+            result_match = re.search(r'<ns2:result[^>]*>(\d+)</ns2:result>', response.text, re.IGNORECASE)
+        if not result_match:
+            result_match = re.search(r'<requestId[^>]*>(\d+)</requestId>', response.text, re.IGNORECASE)
+        
         request_id = result_match.group(1) if result_match else None
+
+        if not request_id:
+            print(f"WARNING: Could not extract request ID from response")
+            print(f"Full response: {response.text}")
 
         return {
             "success": True,
             "request_id": request_id,
             "group_id": group_id,
             "csv_file": csv_filename,
-            "message": "Journal FBDI file uploaded successfully to Oracle Fusion"
+            "message": "Journal FBDI file uploaded successfully to Oracle Fusion",
+            "raw_response": response.text  # Include for debugging
         }
 
     except Exception as e:
