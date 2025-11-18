@@ -30,13 +30,9 @@ urlpatterns = [
 
 
 ]
-from django.urls import path
-from .consumers import NotificationConsumer
 
-websocket_urlpatterns = [
-    path(r"ws/notifications/$", NotificationConsumer.as_asgi()),
-]
-
+# WebSocket routing moved to __NOTIFICATIONS_SETUP__/code/routing.py
+# Import from there in asgi.py instead
 
 if settings.DEBUG:
     urlpatterns += static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)

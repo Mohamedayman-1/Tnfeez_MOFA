@@ -1,0 +1,426 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WebSocket Notification Test</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 50px auto;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }
+        .container {
+            background: white;
+            padding: 30px;
+            border-radius: 8px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        h1 {
+            color: #333;
+        }
+        .status {
+            padding: 10px;
+            margin: 10px 0;
+            border-radius: 4px;
+            font-weight: bold;
+        }
+        .connected {
+            background-color: #d4edda;
+            color: #155724;
+        }
+        .disconnected {
+            background-color: #f8d7da;
+            color: #721c24;
+        }
+        .notification {
+            padding: 15px;
+            margin: 10px 0;
+            border-left: 4px solid #007bff;
+            background-color: #f8f9fa;
+            border-radius: 4px;
+        }
+        .notification.started {
+            border-left-color: #ffc107;
+        }
+        .notification.progress {
+            border-left-color: #17a2b8;
+        }
+        .notification.completed {
+            border-left-color: #28a745;
+        }
+        .notification.failed {
+            border-left-color: #dc3545;
+        }
+        .notification-time {
+            font-size: 0.85em;
+            color: #6c757d;
+        }
+        .notification-message {
+            margin: 5px 0;
+            font-size: 1.1em;
+        }
+        .notification-details {
+            font-size: 0.9em;
+            color: #495057;
+            margin-top: 5px;
+        }
+        .progress-bar {
+            width: 100%;
+            height: 30px;
+            background-color: #e9ecef;
+            border-radius: 4px;
+            overflow: hidden;
+            margin: 10px 0;
+        }
+        .progress-fill {
+            height: 100%;
+            background-color: #007bff;
+            transition: width 0.3s ease;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: white;
+            font-weight: bold;
+        }
+        button {
+            background-color: #007bff;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 16px;
+            margin: 5px;
+        }
+        button:hover {
+            background-color: #0056b3;
+        }
+        button:disabled {
+            background-color: #6c757d;
+            cursor: not-allowed;
+        }
+        #notifications {
+            max-height: 500px;
+            overflow-y: auto;
+            margin-top: 20px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🔔 Real-time Notification Test</h1>
+        
+        <div id="connection-status" class="status disconnected">
+            ⚠️ Disconnected
+        </div>
+
+        <div>
+            <button type="button" id="connect-btn" onclick="connect(); return false;">Connect WebSocket</button>
+            <button type="button" id="disconnect-btn" onclick="disconnect(); return false;" disabled>Disconnect</button>
+            <button type="button" onclick="clearNotifications(); return false;">Clear Notifications</button>
+        </div>
+
+        <div style="margin: 20px 0;">
+            <label for="jwt-token" style="display: block; margin-bottom: 5px; font-weight: bold;">JWT Token (optional):</label>
+            <input type="text" id="jwt-token" placeholder="Paste your JWT token here" style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px;">
+            <small style="color: #666;">Leave empty to use session authentication (must be logged in to Django admin)</small>
+        </div>
+
+        <div style="margin: 20px 0;">
+            <label for="user-id" style="display: block; margin-bottom: 5px; font-weight: bold;">User ID (optional):</label>
+            <input type="number" id="user-id" placeholder="Enter user_id to connect as" style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px;">
+            <small style="color: #666;">Useful for testing when you know the exact user_id (overrides session)</small>
+        </div>
+
+        <div id="progress-container" style="display: none;">
+            <h3>Upload Progress</h3>
+            <div class="progress-bar">
+                <div id="progress-fill" class="progress-fill" style="width: 0%;">
+                    0%
+                </div>
+            </div>
+            <p id="progress-step"></p>
+        </div>
+
+        <h2>Notifications</h2>
+        <div id="notifications"></div>
+    </div>
+
+    <script>
+        let socket = null;
+        let currentProgress = 0;
+        let reconnectAttempts = 0;
+        let maxReconnectAttempts = 5;
+        let reconnectTimeout = null;
+        let pingInterval = null;
+        let shouldReconnect = true;
+
+        function connect() {
+            if (socket && socket.readyState === WebSocket.OPEN) {
+                console.log('Already connected');
+                return;
+            }
+
+            // Clear any existing reconnect timeout
+            if (reconnectTimeout) {
+                clearTimeout(reconnectTimeout);
+                reconnectTimeout = null;
+            }
+            
+            // Reset shouldReconnect flag when manually connecting
+            shouldReconnect = true;
+
+            // Get auth inputs
+            const jwtToken = document.getElementById('jwt-token').value.trim();
+            const userId = document.getElementById('user-id').value.trim();
+            
+            // Build query params
+            const params = [];
+            if (jwtToken) {
+                params.push(`token=${encodeURIComponent(jwtToken)}`);
+                console.log('🔑 Connecting with JWT token...');
+            }
+            if (userId) {
+                params.push(`user_id=${encodeURIComponent(userId)}`);
+                console.log(`👤 Connecting as user_id=${userId}`);
+            }
+            if (!jwtToken && !userId) {
+                console.log('🔑 Connecting with session auth (must be logged in)...');
+            }
+
+            // Build WebSocket URL
+            let wsUrl = 'ws://127.0.0.1:8000/ws/notifications/';
+            if (params.length > 0) {
+                wsUrl += `?${params.join('&')}`;
+            }
+            
+            console.log('Connecting to:', wsUrl.replace(/token=[^&]+/, 'token=***'));
+            
+            socket = new WebSocket(wsUrl);
+
+            socket.onopen = function(e) {
+                console.log('✅ WebSocket connected');
+                reconnectAttempts = 0;
+                updateConnectionStatus(true);
+                document.getElementById('connect-btn').disabled = true;
+                document.getElementById('disconnect-btn').disabled = false;
+                addNotification('info', 'Connected', 'WebSocket connection established');
+                
+                // Start ping interval
+                startPingInterval();
+            };
+
+            socket.onmessage = function(event) {
+                console.log('📩 Message received:', event.data);
+                const data = JSON.parse(event.data);
+                handleNotification(data);
+            };
+
+            socket.onclose = function(event) {
+                console.log('⚠️ WebSocket closed', event);
+                console.log('Close code:', event.code, 'Reason:', event.reason);
+                updateConnectionStatus(false);
+                document.getElementById('connect-btn').disabled = false;
+                document.getElementById('disconnect-btn').disabled = true;
+                
+                // Stop ping interval
+                stopPingInterval();
+                
+                // Don't auto-reconnect if rejected due to authentication (close code 1006 before connection established)
+                if (event.code === 1006 && reconnectAttempts === 0) {
+                    console.log('❌ Connection rejected - likely authentication issue. Provide a valid JWT token or login to Django admin.');
+                    addNotification('error', 'Authentication Failed', 'Connection rejected. Please provide a valid JWT token or ensure you are logged in to Django admin.');
+                    shouldReconnect = false;
+                    return;
+                }
+                
+                // Auto-reconnect if not manually disconnected
+                if (shouldReconnect && reconnectAttempts < maxReconnectAttempts) {
+                    const delay = Math.min(1000 * Math.pow(2, reconnectAttempts), 30000);
+                    reconnectAttempts++;
+                    console.log(`Reconnecting in ${delay/1000}s (attempt ${reconnectAttempts}/${maxReconnectAttempts})`);
+                    addNotification('warning', 'Disconnected', `Reconnecting in ${delay/1000}s...`);
+                    
+                    reconnectTimeout = setTimeout(() => {
+                        connect();
+                    }, delay);
+                }
+            };
+
+            socket.onerror = function(error) {
+                console.error('❌ WebSocket error:', error);
+                addNotification('error', 'Connection Error', 'Failed to connect to WebSocket. Make sure you are logged in.');
+            };
+        }
+
+        function disconnect() {
+            shouldReconnect = false; // Prevent auto-reconnect
+            reconnectAttempts = maxReconnectAttempts; // Stop reconnection attempts
+            
+            if (reconnectTimeout) {
+                clearTimeout(reconnectTimeout);
+                reconnectTimeout = null;
+            }
+            
+            stopPingInterval();
+            
+            if (socket) {
+                socket.close();
+                socket = null;
+            }
+            
+            addNotification('info', 'Disconnected', 'WebSocket connection closed');
+        }
+
+        function startPingInterval() {
+            // Stop any existing interval
+            stopPingInterval();
+            
+            // Send ping every 30 seconds to keep connection alive
+            pingInterval = setInterval(() => {
+                if (socket && socket.readyState === WebSocket.OPEN) {
+                    console.log('Sending ping...');
+                    socket.send(JSON.stringify({
+                        type: 'ping',
+                        timestamp: new Date().toISOString()
+                    }));
+                }
+            }, 30000);
+        }
+
+        function stopPingInterval() {
+            if (pingInterval) {
+                clearInterval(pingInterval);
+                pingInterval = null;
+            }
+        }
+
+        function updateConnectionStatus(connected) {
+            const statusDiv = document.getElementById('connection-status');
+            if (connected) {
+                statusDiv.className = 'status connected';
+                statusDiv.innerHTML = '✅ Connected';
+            } else {
+                statusDiv.className = 'status disconnected';
+                statusDiv.innerHTML = '⚠️ Disconnected';
+            }
+        }
+
+        function handleNotification(data) {
+            console.log('Handling notification:', data);
+
+            switch(data.type) {
+                case 'connection_established':
+                    addNotification('info', 'Connection Established', `Connected as user ${data.user_id}`);
+                    break;
+
+                case 'oracle_upload_started':
+                    document.getElementById('progress-container').style.display = 'block';
+                    updateProgress(0, 'Starting Oracle upload...');
+                    addNotification('started', 'Upload Started', data.message);
+                    break;
+
+                case 'oracle_upload_progress':
+                    const percentage = (data.step_number / data.total_steps) * 100;
+                    updateProgress(percentage, `${data.step} - ${data.message}`);
+                    addNotification('progress', `Step ${data.step_number}/${data.total_steps}: ${data.step}`, data.message);
+                    break;
+
+                case 'oracle_upload_completed':
+                    updateProgress(100, 'Upload completed successfully!');
+                    addNotification('completed', 'Upload Completed', data.message);
+                    setTimeout(() => {
+                        document.getElementById('progress-container').style.display = 'none';
+                    }, 3000);
+                    break;
+
+                case 'oracle_upload_failed':
+                    addNotification('failed', 'Upload Failed', `${data.message}<br>Error: ${data.error}`);
+                    document.getElementById('progress-container').style.display = 'none';
+                    break;
+
+                case 'notification':
+                    addNotification('info', 'Notification', data.message);
+                    break;
+
+                case 'pong':
+                    console.log('Pong received');
+                    break;
+
+                default:
+                    console.log('Unknown notification type:', data.type);
+            }
+        }
+
+        function updateProgress(percentage, stepText) {
+            currentProgress = percentage;
+            const progressFill = document.getElementById('progress-fill');
+            progressFill.style.width = percentage + '%';
+            progressFill.textContent = Math.round(percentage) + '%';
+            document.getElementById('progress-step').textContent = stepText;
+        }
+
+        function addNotification(type, title, message) {
+            const notificationsDiv = document.getElementById('notifications');
+            const notification = document.createElement('div');
+            notification.className = `notification ${type}`;
+            
+            const now = new Date();
+            const timeString = now.toLocaleTimeString();
+
+            notification.innerHTML = `
+                <div class="notification-time">${timeString}</div>
+                <div class="notification-message"><strong>${title}</strong></div>
+                <div class="notification-details">${message}</div>
+            `;
+
+            notificationsDiv.insertBefore(notification, notificationsDiv.firstChild);
+
+            // Play sound (optional)
+            playNotificationSound();
+
+            // Show browser notification if permitted
+            if (Notification.permission === 'granted') {
+                new Notification(title, {
+                    body: message,
+                    icon: '/static/notification-icon.png' // Add your icon
+                });
+            }
+        }
+
+        function clearNotifications() {
+            document.getElementById('notifications').innerHTML = '';
+            currentProgress = 0;
+        }
+
+        function playNotificationSound() {
+            // Uncomment to play sound
+            // const audio = new Audio('/static/notification.mp3');
+            // audio.play();
+        }
+
+        // Request notification permission on load
+        if ('Notification' in window && Notification.permission === 'default') {
+            Notification.requestPermission();
+        }
+
+        // Auto-connect on page load
+        window.addEventListener('load', function() {
+            console.log('Page loaded, auto-connecting WebSocket...');
+            shouldReconnect = true;
+            connect();
+        });
+
+        // Cleanup on page unload
+        window.addEventListener('beforeunload', function() {
+            shouldReconnect = false;
+            if (socket) {
+                socket.close();
+            }
+        });
+    </script>
+</body>
+</html>

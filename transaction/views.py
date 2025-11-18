@@ -1126,60 +1126,15 @@ class transcationtransferSubmit(APIView):
                         status=status.HTTP_404_NOT_FOUND,
                     )
 
-                if code[0:3] != "AFR":
-                    csv_upload_result, result = create_and_upload_journal(transfers=transfers,transaction_id=transaction_id,entry_type="submit")
-        
-                    if csv_upload_result.get("success"):
-                        response_data = {
-                            "message": "Transfers submitted for approval successfully",
-                            "transaction_id": transaction_id,
-                            "pivot_updates": pivot_updates,
-                            "journal_file": result if result else None,
-                        }
-                        if csv_upload_result:
-                            response_data["fbdi_upload"] = csv_upload_result
-                    else:
-                        return Response(
-                            {
-                                "Status": "Submitted failed",
-                                "Error": f"FBDI Upload failed: {csv_upload_result.get('error')}",
-                                "Status_Detail": {csv_upload_result.get('warning')},
-                            },
-                            status=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                        )
-
-                else:
-                    response_data = {
-                        "message": "Transfers submitted for approval successfully",
-                        "transaction_id": transaction_id,
-                        "pivot_updates": pivot_updates,
-                        "journal_file": None,
-                    }
-
-                    # csv_upload_result,result=submit_budget_and_upload(transfers=transfers,transaction_id=transaction_id)
+                
 
                 budget_transfer = xx_BudgetTransfer.objects.get(pk=transaction_id)
                 budget_transfer.status = "submitted"
                 budget_transfer.status_level = 2
                 budget_transfer.save()
 
-                # user_submit=xx_notification()
-                # user_submit.create_notification(user=request.user,message=f"you have submited the trasnation {transaction_id} secessfully ")
-
-                # Prepare response data
-                # response_data = {
-                #     "message": "Transfers submitted for approval successfully",
-                #     "transaction_id": transaction_id,
-                #     "pivot_updates": pivot_updates,
-                #     "journal_file": result if result else None,
-                # }
-
-                # Add FBDI upload results if available
-                # if csv_upload_result:
-                #     response_data["fbdi_upload"] = csv_upload_result
-
-                # Return success response here, inside the try block
-                return Response(response_data, status=status.HTTP_200_OK)
+              
+                return Response("Transaction submitted successfully", status=status.HTTP_200_OK)
 
             except xx_BudgetTransfer.DoesNotExist:
                 return Response(

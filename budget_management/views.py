@@ -1,5 +1,6 @@
 from datetime import time
 from decimal import Decimal
+from chromadb import logger
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework import status
@@ -11,6 +12,7 @@ from django.db.models.functions import Cast, Coalesce
 from django.db.models import CharField
 from approvals.managers import ApprovalManager
 from approvals.models import ApprovalAction, ApprovalWorkflowInstance
+from budget_management.tasks import upload_budget_to_oracle, upload_journal_to_oracle
 from oracle_fbdi_integration.utilities.automatic_posting import submit_automatic_posting
 from oracle_fbdi_integration.utilities.Status import wait_for_job
 
@@ -748,60 +750,80 @@ class transcationtransferapprovel_reject(APIView):
                         # Update the pivot fund
 
                         if Status == "approved":
-                            if trasncation.code[0:3] != "AFR":
-                                csv_upload_result, result = create_and_upload_journal(
-                                    transfers=trasfers,
-                                    transaction_id=transaction_id,
-                                    entry_type="reject",
-                                )
-                                response_data = {
-                                    "message": "Transfers submitted for approval successfully",
-                                    "transaction_id": transaction_id,
-                                    "pivot_updates": pivot_updates,
-                                    "journal_file": result if result else None,
-                                }
-                                if csv_upload_result:
-                                    response_data["fbdi_upload_journal"] = (
-                                        csv_upload_result
-                                    )
-
-                                results.append(response_data)
-                                print("start for 90 seconds")
-                                time.sleep(
-                                    90
-                                )  # wait for 90 seconds before submitting budget
-                                print("wait for 90 seconds")
-                            submit_automatic_posting()
-                            time.sleep(
-                                10
-                            )  # wait for 10 seconds before submitting budget
-                            csv_upload_result, result = create_and_upload_budget(
+                           
+                           upload_result, result_path= upload_journal_to_oracle.delay(
                                 transfers=trasfers,
                                 transaction_id=transaction_id,
+                                entry_type="rejected"
                             )
-                            if csv_upload_result:
-                                response_data["fbdi_upload_budget"] = csv_upload_result
-                        #   continue
-                        if Status == "rejected":
-                            if trasncation.code[0:3] != "AFR":
-                                csv_upload_result, result = create_and_upload_journal(
-                                    transfers=trasfers,
-                                    transaction_id=transaction_id,
-                                    entry_type="reject",
-                                )
-                                wait_for_job()
-                                time.sleep(90)
-                                submit_automatic_posting()
-                                response_data = {
-                                    "message": "Transfers submitted for approval successfully",
-                                    "transaction_id": transaction_id,
-                                    "pivot_updates": pivot_updates,
-                                    "journal_file": result if result else None,
-                                }
-                                if csv_upload_result:
-                                    response_data["fbdi_upload"] = csv_upload_result
+                           if upload_result.get("success"):
+                                upload_result, result_path= upload_budget_to_oracle.delay(
+                                transfers=trasfers,
+                                transaction_id=transaction_id,
+                                entry_type="rejected"
+                            )
+                        else:
+                            pass
+                          
 
-                                results.append(response_data)
+
+
+
+
+                        #     if trasncation.code[0:3] != "AFR":
+                        #         csv_upload_result, result = create_and_upload_journal(
+                        #             transfers=trasfers,
+                        #             transaction_id=transaction_id,
+                        #             entry_type="reject",
+                        #         )
+                        #         response_data = {
+                        #             "message": "Transfers submitted for approval successfully",
+                        #             "transaction_id": transaction_id,
+                        #             "pivot_updates": pivot_updates,
+                        #             "journal_file": result if result else None,
+                        #         }
+                        #         if csv_upload_result:
+                        #             response_data["fbdi_upload_journal"] = (
+                        #                 csv_upload_result
+                        #             )
+
+                        #         results.append(response_data)
+                        #         print("start for 90 seconds")
+                        #         time.sleep(
+                        #             90
+                        #         )  # wait for 90 seconds before submitting budget
+                        #         print("wait for 90 seconds")
+                        #     submit_automatic_posting()
+                        #     time.sleep(
+                        #         10
+                        #     )  # wait for 10 seconds before submitting budget
+                        #     csv_upload_result, result = create_and_upload_budget(
+                        #         transfers=trasfers,
+                        #         transaction_id=transaction_id,
+                        #     )
+                        #     if csv_upload_result:
+                        #         response_data["fbdi_upload_budget"] = csv_upload_result
+                        # #   continue
+                        if Status == "rejected":
+                            # if trasncation.code[0:3] != "AFR":
+                            #     csv_upload_result, result = create_and_upload_journal(
+                            #         transfers=trasfers,
+                            #         transaction_id=transaction_id,
+                            #         entry_type="reject",
+                            #     )
+                            #     wait_for_job()
+                            #     time.sleep(90)
+                            #     submit_automatic_posting()
+                            #     response_data = {
+                            #         "message": "Transfers submitted for approval successfully",
+                            #         "transaction_id": transaction_id,
+                            #         "pivot_updates": pivot_updates,
+                            #         "journal_file": result if result else None,
+                            #     }
+                            #     if csv_upload_result:
+                            #         response_data["fbdi_upload"] = csv_upload_result
+
+                            #     results.append(response_data)
 
                         # update_result = update_pivot_fund(
                         #     transfer.cost_center_code,
@@ -813,6 +835,7 @@ class transcationtransferapprovel_reject(APIView):
                         # )
                         # if update_result:
                         #     pivot_updates.append(update_result)
+                         pass
                     except Exception as e:
                         pivot_updates.append(
                             {

@@ -15,7 +15,7 @@ from oracle_fbdi_integration.core.journal_manager import (
 )
 from oracle_fbdi_integration.core.upload_manager import upload_journal_fbdi
 from oracle_fbdi_integration import JOURNALS_DIR, TEMPLATES_DIR
-from oracle_fbdi_integration.utilities.Upload_essjob_api import run_complete_workflow
+from oracle_fbdi_integration.utilities.Upload_essjob_api_journal import run_complete_workflow
 from budget_management.models import xx_BudgetTransfer
 
 def create_and_upload_journal(transfers, transaction_id: int, entry_type: str = "submit"):

@@ -25,6 +25,7 @@ ALLOWED_HOSTS = [
 
 # Application definition
 INSTALLED_APPS = [
+    # "daphne",  # Disabled - using WSGI instead of ASGI
     "django.contrib.admin",
     "django.contrib.auth",
     "django.contrib.admindocs",
@@ -34,7 +35,7 @@ INSTALLED_APPS = [
     "django.contrib.staticfiles",
     "rest_framework",
     "rest_framework_simplejwt",
-    "channels",
+    # "channels",  # Disabled - no WebSocket notifications
     "corsheaders",
     "user_management",
     "budget_management.apps.BudgetManagementConfig",
@@ -59,14 +60,15 @@ REST_FRAMEWORK = {
 }
 
 
-CHANNEL_LAYERS = {
-    "default": {
-        "BACKEND": "channels_redis.core.RedisChannelLayer",
-        "CONFIG": {
-            "hosts": [("127.0.0.1", 6379)],
-        },
-    },
-}
+# CHANNEL_LAYERS disabled - not using WebSocket notifications
+# CHANNEL_LAYERS = {
+#     "default": {
+#         "BACKEND": "channels_redis.core.RedisChannelLayer",
+#         "CONFIG": {
+#             "hosts": [("127.0.0.1", 6379)],
+#         },
+#     },
+# }
 
 
 FIELD_ENCRYPTION_KEY = "G2g9Xb8qH-SZs-So5QEK1EXmf_lUqHuvdgFnitEtRB0="
@@ -105,7 +107,7 @@ TEMPLATES = [
 ]
 
 WSGI_APPLICATION = "budget_transfer.wsgi.application"
-
+# ASGI_APPLICATION = "budget_transfer.asgi.application"  # Disabled - using WSGI
 
 # Database
 DATABASES = {
@@ -250,4 +252,53 @@ LOGGING = {
             "propagate": False,
         },
     },
+}
+
+# ============================================================================
+# Celery Configuration
+# ============================================================================
+
+# Celery broker URL (using Redis)
+CELERY_BROKER_URL = 'redis://127.0.0.1:6379/0'
+
+# Celery result backend (using Redis)
+CELERY_RESULT_BACKEND = 'redis://127.0.0.1:6379/0'
+
+# Broker connection settings
+CELERY_BROKER_CONNECTION_RETRY = True
+CELERY_BROKER_CONNECTION_RETRY_ON_STARTUP = True
+CELERY_BROKER_CONNECTION_MAX_RETRIES = 10
+
+# Redis connection pool settings
+CELERY_BROKER_POOL_LIMIT = 10
+CELERY_BROKER_TRANSPORT_OPTIONS = {
+    'visibility_timeout': 3600,
+    'max_connections': 50,
+}
+
+# Celery task serializer
+CELERY_TASK_SERIALIZER = 'json'
+
+# Celery result serializer
+CELERY_RESULT_SERIALIZER = 'json'
+
+# Celery accept content types
+CELERY_ACCEPT_CONTENT = ['json']
+
+# Celery timezone (match Django timezone)
+CELERY_TIMEZONE = 'UTC'
+
+# Celery task time limit (30 minutes for Oracle uploads)
+CELERY_TASK_TIME_LIMIT = 30 * 60
+
+# Celery task soft time limit (25 minutes warning)
+CELERY_TASK_SOFT_TIME_LIMIT = 25 * 60
+
+# Celery beat schedule (for periodic tasks - optional)
+CELERY_BEAT_SCHEDULE = {
+    # Add periodic tasks here if needed
+    # 'task-name': {
+    #     'task': 'app.tasks.task_name',
+    #     'schedule': crontab(hour=2, minute=0),
+    # },
 }

@@ -200,7 +200,7 @@ def create_journal_entry_data(
     mapper = OracleSegmentMapper()
     
     timestamp = time.strftime("%Y%m%d_%H%M%S")
-    batch_name = f"BATCH_TRANSFER_{timestamp}_TXN_{transaction_id}"
+    # batch_name = f"BATCH_TRANSFER_{timestamp}_TXN_{transaction_id}"
     batch_description = f"Balance Transfer Batch - Transaction {transaction_id}"
     journal_name = f"JOURNAL_TRANSFER_{timestamp}_TXN_{transaction_id}"
     journal_description = f"Journal Entry for Balance Transfer - Transaction {transaction_id}"
@@ -222,6 +222,7 @@ def create_journal_entry_data(
     # Create journal lines for each transfer (FROM side - debit entries)
     journal_catgorays=["حجز من ميزانية السيولة","حجز من ميزانية التكاليف"]
     for journal_catgoray in journal_catgorays:
+        batch_name = f"BATCH_{journal_catgoray}_{timestamp}_TXN_{transaction_id}"
         for transfer in transfers:
             from_amount = getattr(transfer, "from_center", 0) or 0
             if from_amount > 0:
@@ -251,6 +252,7 @@ def create_journal_entry_data(
                 sample_data.append(segment_data)
 
         if total_debit > 0 and transfers:
+            
             # Static segment values for offsetting entry
             offsetting_entry = {
                 "Status Code": "NEW",

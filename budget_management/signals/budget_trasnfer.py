@@ -12,6 +12,8 @@ from ..models import xx_BudgetTransfer
 from user_management.models import xx_notification
 import logging
 from budget_transfer.global_function.dashbaord import dashboard_smart, dashboard_normal
+from transaction.models import xx_TransactionTransfer
+from budget_management.tasks import upload_journal_to_oracle
 
 # Configure logging for budget transfer signals
 logger = logging.getLogger("budget_transfer_signals")
@@ -66,7 +68,47 @@ def budget_transfer_post_delete(sender, instance, **kwargs):
         logger.error(f"Error in budget_transfer_post_delete: {str(e)}")
 
 
-print("[DEBUG] budget_transfer signals module loaded")
+
+
+
+
+
+
+@receiver(post_save, sender=xx_BudgetTransfer)
+def Run_oracle_upload_journal_workflow(sender, instance, created, **kwargs):
+    """
+    Upload journal to Oracle when budget transfer is submitted
+    Uses Celery for asynchronous processing (doesn't block the request)
+    """
+    try:
+        # Only run for existing records (not newly created) when status changes to submitted
+        if not created and instance.status == "submitted":
+            print(
+                "[DEBUG] Queueing Oracle upload journal workflow for transfer",
+                instance.transaction_id,
+            )
+            
+            # Check if code requires Oracle upload
+            if instance.code and instance.code[0:3] != "AFR":
+                # Queue the task in Celery (runs in background)
+                upload_journal_to_oracle.delay(
+                    transaction_id=instance.transaction_id,
+                    entry_type="submit"
+                )
+                logger.info(
+                    f"Oracle upload task queued for BudgetTransfer {instance.transaction_id}"
+                )
+            else:
+                logger.info(
+                    f"BudgetTransfer {instance.transaction_id} has AFR code, skipping Oracle journal upload"
+                )
+                
+    except Exception as e:
+        logger.error(
+            f"Error queueing Oracle upload workflow for BudgetTransfer {instance.transaction_id}: {str(e)}"
+        )
+
+
 
 
 @receiver(post_save, sender=xx_BudgetTransfer)
@@ -80,8 +122,12 @@ def create_workflow_instance(sender, instance, created, **kwargs):
         )
     else:
         if instance.status == "submitted":
+
             instance.status = "pending"
             instance.save(update_fields=["status"])
             ApprovalManager.start_workflow(
                 transfer_type=instance.type.lower(), budget_transfer=instance
             )
+
+
+

@@ -3,7 +3,9 @@ djangorestframework
 djangorestframework-simplejwt
 django-cors-headers
 oracledb
-channels
+channels==4.0.0
+channels-redis==4.1.0
+daphne==4.0.0
 pandas
 gunicorn
 openpyxl
@@ -11,7 +13,8 @@ django-encrypted-model-fields
 pyopenssl
 Werkzeug
 django_extensions
-celery
+celery==5.5.3
+redis==7.0.1
 psutil
 django-filter
 xlrd
