@@ -247,7 +247,8 @@ def create_journal_entry_data(
                 }
                 segment_data = mapper.build_fbdi_row(
                     transaction_transfer=transfer,
-                    base_row=journal_entry
+                    base_row=journal_entry,
+                    fill_all=True
                 )
                 sample_data.append(segment_data)
 

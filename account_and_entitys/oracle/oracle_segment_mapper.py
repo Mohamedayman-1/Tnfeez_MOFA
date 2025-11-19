@@ -275,7 +275,7 @@ class OracleSegmentMapper:
         return " AND ".join(clauses) if clauses else "1=1"
     
     @staticmethod
-    def build_fbdi_row(transaction_transfer, base_row: Dict[str, Any], include_from_to: str = 'from') -> Dict[str, Any]:
+    def build_fbdi_row(transaction_transfer, base_row: Dict[str, Any], include_from_to: str = 'from',fill_all=False) -> Dict[str, Any]:
         """
         Build complete FBDI row with dynamic segments for journal/budget import.
         
@@ -322,10 +322,13 @@ class OracleSegmentMapper:
         for i in range(1, 31):
             segment_field = f'Segment{i}'
             if segment_field not in fbdi_row:
-                ## get defualt values from segments
-                value=XX_Segment.objects.filter(segment_type=i,is_active=True).first()
-                if value:
-                    fbdi_row[segment_field] = value.code
+                # get defualt values from segments
+                if fill_all==True:
+                    value=XX_Segment.objects.filter(segment_type=i,is_active=True).first()
+                    if value:
+                        fbdi_row[segment_field] = value.code
+                    else:
+                        fbdi_row[segment_field] = None
                 else:
                     fbdi_row[segment_field] = None
         

@@ -15,6 +15,8 @@ from approvals.models import ApprovalAction, ApprovalWorkflowInstance
 from budget_management.tasks import upload_budget_to_oracle, upload_journal_to_oracle
 from oracle_fbdi_integration.utilities.automatic_posting import submit_automatic_posting
 from oracle_fbdi_integration.utilities.Status import wait_for_job
+from oracle_fbdi_integration.utilities.journal_integration import create_and_upload_journal
+from oracle_fbdi_integration.utilities.budget_integration import create_and_upload_budget
 
 from user_management.models import xx_User, xx_notification
 from .models import (
@@ -59,6 +61,13 @@ from rest_framework.permissions import IsAuthenticated
 from django.db.models import Q, Sum, Count, Case, When, Value, F
 from oracle_fbdi_integration.utilities.journal_integration import create_and_upload_journal
 from oracle_fbdi_integration.utilities.budget_integration import create_and_upload_budget
+from rest_framework.views import APIView
+from rest_framework.response import Response
+from rest_framework import status
+from rest_framework.permissions import IsAuthenticated
+
+from budget_management.models import xx_BudgetTransfer
+from budget_management.serializers import BudgetTransferSerializer
 
 
 class TransferPagination(PageNumberPagination):
@@ -491,13 +500,6 @@ class GetBudgetTransferView(APIView):
             )
 
 
-from rest_framework.views import APIView
-from rest_framework.response import Response
-from rest_framework import status
-from rest_framework.permissions import IsAuthenticated
-
-from budget_management.models import xx_BudgetTransfer
-from budget_management.serializers import BudgetTransferSerializer
 
 
 class UpdateBudgetTransferView(APIView):
@@ -750,20 +752,36 @@ class transcationtransferapprovel_reject(APIView):
                         # Update the pivot fund
 
                         if Status == "approved":
+                         
+                          upload_result_journal, result_path_journal=create_and_upload_journal(transaction_id=transaction_id,transfers=trasfers,entry_type="reject")
+                          if upload_result_journal.get("success"):
+                             upload_result_budget, result_path_budget= create_and_upload_budget(transaction_id=transaction_id,transfers=trasfers,entry_type="rejected")
+                             if upload_result_budget.get("success"):
+                                    pass
+                             else:
+                                    pass
+                          else:
+                                pass
                            
-                           upload_result, result_path= upload_journal_to_oracle.delay(
-                                transfers=trasfers,
-                                transaction_id=transaction_id,
-                                entry_type="rejected"
-                            )
-                           if upload_result.get("success"):
-                                upload_result, result_path= upload_budget_to_oracle.delay(
-                                transfers=trasfers,
-                                transaction_id=transaction_id,
-                                entry_type="rejected"
-                            )
+                        #    upload_result, result_path= upload_journal_to_oracle.delay(
+                        #         transfers=trasfers,
+                        #         transaction_id=transaction_id,
+                        #         entry_type="rejected"
+                        #     )
+                        #    if upload_result.get("success"):
+                        #         upload_result, result_path= upload_budget_to_oracle.delay(
+                        #         transfers=trasfers,
+                        #         transaction_id=transaction_id,
+                        #         entry_type="rejected"
+                        #     )
+
                         else:
-                            pass
+                            upload_result_journal, result_path_journal=create_and_upload_journal(transaction_id=transaction_id,transfers=trasfers,entry_type="reject")
+                            if upload_result_journal.get("success"):
+                                pass
+                            else:
+                                pass
+                             
                           
 
 
