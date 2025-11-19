@@ -79,7 +79,7 @@ def create_and_upload_journal(transfers, transaction_id: int, entry_type: str = 
             
             # Run the complete 4-step workflow (UCM upload → Interface Load → Import → AutoPost)
            
-            upload_result = run_complete_workflow(str(csv_path), Groupid=group_id, transaction_id=transaction_id)
+            upload_result = run_complete_workflow(str(csv_path), Groupid=group_id, transaction_id=transaction_id,entry_type=entry_type)
 
             if upload_result.get("success"):
                 print(f"Complete workflow successful! All steps completed.")

@@ -196,7 +196,7 @@ def create_budget_entry_data(
     transaction_id: int,
     source_budget_type: str = "HYPERION",
     source_budget_name: str = "MIC_HQ_MONTHLY",
-    period_name: str = "Sep-25",
+    period_name: str = "1-25",
     currency_code: str = "AED",
 ) -> List[Dict[str, Any]]:
     """
@@ -220,61 +220,69 @@ def create_budget_entry_data(
     """
     mapper = OracleSegmentMapper()
 
+
+    SOURCE_BUDGET_TYPE=os.getenv("ORACLE_SOURCE_BUDGET_TYPE")
+    currency_code=os.getenv("ORACLE_CURRENCY_CODE")
+
+
     # Generate batch identifiers
     timestamp = time.strftime("%Y%m%d_%H%M%S")
-    budget_name = f"{source_budget_name}_{transaction_id}"
+    budget_name = f"{source_budget_name}_{transaction_id}_{timestamp}"
 
     budget_entries = []
     line_number = 1
+    ORACLE_BUDUGET_NAME=os.getenv("ORACLE_BUDUGET_NAME")
+    for Budget_catgoray in ORACLE_BUDUGET_NAME.split(","):
+        source_budget_name = Budget_catgoray
+        budget_name = f"{source_budget_name}_{transaction_id}"
+        for transfer in transfers:
+            from_amount = getattr(transfer, 'from_center', 0) or 0
+            if from_amount > 0:
+                # Base budget entry
+                budget_entry = {
+                    "Source Budget Type": SOURCE_BUDGET_TYPE,
+                    "Source Budget Name": source_budget_name,
+                    "Budget Entry Name": budget_name,
+                    "Line Number": line_number,
+                    "Amount": -1 * from_amount,  # Negative for FROM side
+                    "Currency Code": currency_code,
+                    "Period Name": period_name,
+                }
 
-    for transfer in transfers:
-        # Process FROM side (negative amount - debit)
-        from_amount = getattr(transfer, 'from_center', 0) or 0
-        if from_amount > 0:
-            # Base budget entry
-            budget_entry = {
-                "Source Budget Type": source_budget_type,
-                "Source Budget Name": source_budget_name,
-                "Budget Entry Name": budget_name,
-                "Line Number": line_number,
-                "Amount": -1 * from_amount,  # Negative for FROM side
-                "Currency Code": currency_code,
-                "Period Name": period_name,
-            }
+                # Add dynamic segment columns using mapper
+                budget_entry_with_segments = mapper.build_fbdi_row(
+                    transaction_transfer=transfer,
+                    base_row=budget_entry,
+                    include_from_to='from',
+                    fill_all=False # Use FROM segments
+                )
 
-            # Add dynamic segment columns using mapper
-            budget_entry_with_segments = mapper.build_fbdi_row(
-                transaction_transfer=transfer,
-                base_row=budget_entry,
-                include_from_to='from'  # Use FROM segments
-            )
+                budget_entries.append(budget_entry_with_segments)
+                line_number += 1
 
-            budget_entries.append(budget_entry_with_segments)
-            line_number += 1
+            # Process TO side (positive amount - credit)
+            to_amount = getattr(transfer, 'to_center', 0) or 0
+            if to_amount > 0:
+                # Base budget entry
+                budget_entry = {
+                    "Source Budget Type": SOURCE_BUDGET_TYPE,
+                    "Source Budget Name": source_budget_name,
+                    "Budget Entry Name": budget_name,
+                    "Line Number": line_number,
+                    "Amount": to_amount,  # Positive for TO side
+                    "Currency Code": currency_code,
+                    "Period Name": period_name,
+                }
 
-        # Process TO side (positive amount - credit)
-        to_amount = getattr(transfer, 'to_center', 0) or 0
-        if to_amount > 0:
-            # Base budget entry
-            budget_entry = {
-                "Source Budget Type": source_budget_type,
-                "Source Budget Name": source_budget_name,
-                "Budget Entry Name": budget_name,
-                "Line Number": line_number,
-                "Amount": to_amount,  # Positive for TO side
-                "Currency Code": currency_code,
-                "Period Name": period_name,
-            }
+                # Add dynamic segment columns using mapper
+                budget_entry_with_segments = mapper.build_fbdi_row(
+                    transaction_transfer=transfer,
+                    base_row=budget_entry,
+                    include_from_to='to'  # Use TO segments
+                )
 
-            # Add dynamic segment columns using mapper
-            budget_entry_with_segments = mapper.build_fbdi_row(
-                transaction_transfer=transfer,
-                base_row=budget_entry,
-                include_from_to='to'  # Use TO segments
-            )
-
-            budget_entries.append(budget_entry_with_segments)
-            line_number += 1
+                budget_entries.append(budget_entry_with_segments)
+                line_number += 1
 
     return budget_entries
 

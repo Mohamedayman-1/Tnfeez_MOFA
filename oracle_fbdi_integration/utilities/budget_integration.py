@@ -71,7 +71,7 @@ def create_and_upload_budget(transfers, transaction_id: int, entry_type: str = "
         print(f"Uploading ZIP to Oracle Fusion: {zip_path}")
         
         # Run the complete budget import workflow
-        upload_result = run_complete_workflow(str(zip_path), Groupid=group_id, transaction_id=transaction_id)
+        upload_result = run_complete_workflow(str(zip_path), Groupid=group_id, transaction_id=transaction_id,entry_type=entry_type)
 
         if upload_result.get("success"):
             print(f"Complete workflow successful! All steps completed.")

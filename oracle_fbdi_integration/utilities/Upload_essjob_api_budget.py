@@ -50,7 +50,7 @@ def upload_file_to_ucm(file_path: str) -> Dict:
     payload = {
         "OperationName": "uploadFileToUCM",
         "DocumentContent": base64_content,
-        "DocumentAccount": "fin$/generalLedger$/import$",
+        "DocumentAccount": "fin$/budgetaryControl$/import",
         "ContentType": "csv",
         "FileName": os.path.basename(file_path),
         "DocumentId": None
@@ -117,7 +117,7 @@ def submit_interface_loader(document_id: str) -> Dict:
         "OperationName": "submitESSJobRequest",
         "JobPackageName": "/oracle/apps/ess/financials/commonModules/shared/common/interfaceLoader/",
         "JobDefName": "InterfaceLoaderController",
-        "ESSParameters": f"15,{document_id}",  # 15 = GL_INTERFACE
+        "ESSParameters": f"51,{document_id}",  # 15 = GL_INTERFACE
         "NotificationCode": "10",
         "CallbackURL": None
     }
@@ -160,12 +160,14 @@ def submit_interface_loader(document_id: str) -> Dict:
         }
 
 
-def submit_budget_import(document_id: str, Groupid: Optional[int] = None) -> Dict:
+def submit_budget_import(document_id: str, Groupid: Optional[int] = None, BUDGET_NAME: Optional[str] = None,transaction_id=None) -> Dict:
     """
     Submit BudgetImportLauncher job to import budgets from GL_INTERFACE
     
     Args:
         document_id: UCM Document ID (used as group_id)
+        Groupid: Budget group ID
+        BUDGET_NAME: Budget name from environment or parameter
         
     Returns:
         Dictionary with request_id and status
@@ -173,33 +175,40 @@ def submit_budget_import(document_id: str, Groupid: Optional[int] = None) -> Dic
     BASE_URL = os.getenv("FUSION_BASE_URL")
     USER = os.getenv("FUSION_USER")
     PASS = os.getenv("FUSION_PASS")
-    DATA_ACCESS_SET_ID = os.getenv("ORACLE_ACCESS_SET")
-    LEDGER_ID = os.getenv("ORACLE_LEDGER_ID")
-    SOURCE_NAME = os.getenv("ORACLE_JOURNAL_SOURCE", "Manual")
+    BUDGET_TYPE = os.getenv("ORACLE_SOURCE_BUDGET_TYPE", "HYPERION")
+    budget_entry_name = f"{BUDGET_NAME}_{transaction_id}"
     
+    
+    # Use provided BUDGET_NAME or fallback to default
+    if BUDGET_NAME is None:
+        BUDGET_NAME = "MIC_HQ_MONTHLY"  # Default budget name
+
     print(f"\n" + "="*60)
     print("STEP 3: Running Budget Import")
     print("="*60)
     print(f"Using Group ID: {Groupid}")
+    print(f"Using Budget Name: {BUDGET_NAME}")
+    
+    # Generate unique budget entry name
+    #budget_entry_name = f"{BUDGET_NAME}_{int(time.time())}"
+
+    
     
     import_payload = {
         "OperationName": "submitESSJobRequest",
         "JobPackageName": "/oracle/apps/ess/financials/commitmentControl/integration/budgetImport//",
         "JobDefName": "BudgetImport",
-        "ESSParameters": f"{DATA_ACCESS_SET_ID},{300000035868597},{LEDGER_ID},{Groupid},N,N",
+        "ESSParameters": f"{BUDGET_TYPE},{BUDGET_NAME},{budget_entry_name},INCREMENT,,ESS,XCC,ADJUST_BUDGET,NA",
         "NotificationCode": "10",
         "CallbackURL": None
     }
 
+   
 
-        #  <typ:paramList>MIC_HQ_MONTHLY</typ:paramList>
-        #  <typ:paramList>MIC_HQ_MONTHLY_{transaction_id}</typ:paramList>
-        #  <typ:paramList>INCREMENT</typ:paramList>
-        #  <typ:paramList></typ:paramList>
-        #  <typ:paramList>ESS</typ:paramList>
-        #  <typ:paramList>XCC</typ:paramList>
-        #  <typ:paramList>ADJUST_BUDGET</typ:paramList>
-        #  <typ:paramList>NA</typ:paramList>
+
+
+
+
 
 
 
@@ -354,7 +363,7 @@ def wait_for_job_completion(request_id: str, job_name: str = "Job", max_polls: i
     return {"success": False, "state": "TIMEOUT", "error": "Job did not complete in time"}
 
 
-def run_complete_workflow(file_path: str, Groupid: Optional[int] = None, transaction_id: Optional[int] = None) -> Dict:
+def run_complete_workflow(file_path: str, Groupid: Optional[int] = None, transaction_id: Optional[int] = None, entry_type: Optional[str] = "submit") -> Dict:
     """
     Run the complete 4-step GL journal import workflow
     Sends real-time WebSocket notifications for progress updates
@@ -387,7 +396,8 @@ def run_complete_workflow(file_path: str, Groupid: Optional[int] = None, transac
             step_name="Journal Upload to UCM",
             step_number=1,
             status="In Progress",
-            message=f"Uploading file {file_path} to UCM"
+            message=f"Uploading file {file_path} to UCM",
+            Action_Type=entry_type
         )
 
         upload_result = upload_file_to_ucm(file_path)
@@ -421,7 +431,8 @@ def run_complete_workflow(file_path: str, Groupid: Optional[int] = None, transac
             step_name="Interface Loader Submission",
             step_number=2,
             status="In Progress",
-            message=f"Submitting Interface Loader for Document ID {document_id}"
+            message=f"Submitting Interface Loader for Document ID {document_id}",
+            Action_Type=entry_type
         )
         load_result = submit_interface_loader(document_id)
         audit_interface_loader.request_id = load_result.get("request_id")
@@ -458,75 +469,86 @@ def run_complete_workflow(file_path: str, Groupid: Optional[int] = None, transac
         
        
         # Step 3: Submit budget Import
+        ORACLE_BUDUGET_NAME = os.getenv("ORACLE_BUDUGET_NAME")
+        
+        # Handle None or empty budget names
+        if ORACLE_BUDUGET_NAME:
+            budget_names = ORACLE_BUDUGET_NAME.split(",")
+        else:
+            budget_names = ["MIC_HQ_MONTHLY"]  # Default budget name
       
+        for budget_name in budget_names:
+            print(f"\nProcessing Budget Import for: {budget_name}")
+            audit_budget_import = xx_budget_integration_audit.objects.create(
+                transaction_id=transaction_obj,
+                step_name=f"Budget Import Submission for {budget_name}",
+                step_number=3,
+                status="In Progress",
+                message=f"Submitting Budget Import for Group ID {Groupid}",
+                group_id=Groupid,
+                Action_Type=entry_type
+            )
+            import_result = submit_budget_import(document_id, Groupid=Groupid, BUDGET_NAME=budget_name,transaction_id=transaction_id)
+
+            audit_budget_import.request_id = import_result.get("request_id")
+            audit_budget_import.save()
+            workflow_results["steps"].append({"step": "journal_import", "result": import_result})
+            
+            if not import_result["success"]:
+                workflow_results["error"] = "Journal import submission failed"
+                return workflow_results
+            
+            # Wait for journal import to complete
+            import_status = wait_for_job_completion(import_result["request_id"], "Journal Import")
+            workflow_results["steps"].append({"step": "journal_import_status", "result": import_status})
         
-        audit_budget_import = xx_budget_integration_audit.objects.create(
-            transaction_id=transaction_obj,
-            step_name="Budget Import Submission",
-            step_number=3,
-            status="In Progress",
-            message=f"Submitting Budget Import for Group ID {Groupid}",
-            group_id=Groupid
-        )
-        import_result = submit_budget_import(document_id,Groupid=Groupid)
-        audit_budget_import.request_id = import_result.get("request_id")
-        audit_budget_import.save()
-        workflow_results["steps"].append({"step": "journal_import", "result": import_result})
-        
-        if not import_result["success"]:
-            workflow_results["error"] = "Journal import submission failed"
-            return workflow_results
-        
-        # Wait for journal import to complete
-        import_status = wait_for_job_completion(import_result["request_id"], "Journal Import")
-        workflow_results["steps"].append({"step": "journal_import_status", "result": import_status})
-        
-        if not import_status["success"]:
-            workflow_results["error"] = f"Budget import {import_status['state']}"
-            audit_budget_import.status = "Failed"
-            audit_budget_import.message = f"Budget import {import_status['state']}"
+            if not import_status["success"]:
+                workflow_results["error"] = f"Budget import {import_status['state']}"
+                audit_budget_import.status = "Failed"
+                audit_budget_import.message = f"Budget import {import_status['state']}"
+                audit_budget_import.completed_at = timezone.now()
+                audit_budget_import.save()
+                return workflow_results
+            audit_budget_import.status = "Success"
+            audit_budget_import.message = "Budget Import completed successfully"
             audit_budget_import.completed_at = timezone.now()
             audit_budget_import.save()
-            return workflow_results
-        audit_budget_import.status = "Success"
-        audit_budget_import.message = "Budget Import completed successfully"
-        audit_budget_import.completed_at = timezone.now()
-        audit_budget_import.save()
         
         # Step 4: Submit AutoPost
-        audit_autopost = xx_budget_integration_audit.objects.create(
-            transaction_id=transaction_obj,
-            step_name="Automatic Posting Submission",
-            step_number=4,
-            status="In Progress",
-            message="Submitting Automatic Posting"
-        )
-        post_result = submit_automatic_posting()
-        audit_autopost.request_id = post_result.get("request_id")
-        audit_autopost.save()
-        workflow_results["steps"].append({"step": "autopost", "result": post_result})
+        #audit_autopost = xx_budget_integration_audit.objects.create(
+        #    transaction_id=transaction_obj,
+        #    step_name="Automatic Posting Submission",
+        #    step_number=4,
+        #    status="In Progress",
+        #    message="Submitting Automatic Posting",
+        #    Action_Type=entry_type
+        #)
+        #post_result = submit_automatic_posting()
+        #audit_autopost.request_id = post_result.get("request_id")
+        #audit_autopost.save()
+        #workflow_results["steps"].append({"step": "autopost", "result": post_result})
         
-        if not post_result["success"]:
-            workflow_results["error"] = "AutoPost submission failed"
-            workflow_results["warning"] = "Journals imported but not posted"
-            return workflow_results
+        #if not post_result["success"]:
+        #    workflow_results["error"] = "AutoPost submission failed"
+        #    workflow_results["warning"] = "Journals imported but not posted"
+        #    return workflow_results
         
-        # Wait for autopost to complete
-        post_status = wait_for_job_completion(post_result["request_id"], "AutoPost")
-        workflow_results["steps"].append({"step": "autopost_status", "result": post_status})
+        ## Wait for autopost to complete
+        #post_status = wait_for_job_completion(post_result["request_id"], "AutoPost")
+        #workflow_results["steps"].append({"step": "autopost_status", "result": post_status})
         
-        if not post_status["success"]:
-            workflow_results["error"] = f"AutoPost {post_status['state']}"
-            workflow_results["warning"] = "Journals imported but posting failed"
-            audit_autopost.status = "Failed"
-            audit_autopost.message = f"AutoPost {post_status['state']}"
-            audit_autopost.completed_at = timezone.now()
-            audit_autopost.save()
-            return workflow_results
-        audit_autopost.status = "Success"
-        audit_autopost.message = "Automatic Posting completed successfully"
-        audit_autopost.completed_at = timezone.now()
-        audit_autopost.save()
+        #if not post_status["success"]:
+        #    workflow_results["error"] = f"AutoPost {post_status['state']}"
+        #    workflow_results["warning"] = "Journals imported but posting failed"
+        #    audit_autopost.status = "Failed"
+        #    audit_autopost.message = f"AutoPost {post_status['state']}"
+        #    audit_autopost.completed_at = timezone.now()
+        #    audit_autopost.save()
+        #    return workflow_results
+        #audit_autopost.status = "Success"
+        #audit_autopost.message = "Automatic Posting completed successfully"
+        #audit_autopost.completed_at = timezone.now()
+        #audit_autopost.save()
         
         # All steps completed successfully
         overall_process = xx_budget_integration_audit.objects.create(

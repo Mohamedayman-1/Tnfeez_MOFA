@@ -340,7 +340,7 @@ def wait_for_job_completion(request_id: str, job_name: str = "Job", max_polls: i
     return {"success": False, "state": "TIMEOUT", "error": "Job did not complete in time"}
 
 
-def run_complete_workflow(file_path: str, Groupid: Optional[int] = None, transaction_id: Optional[int] = None) -> Dict:
+def run_complete_workflow(file_path: str, Groupid: Optional[int] = None, transaction_id: Optional[int] = None,entry_type: str = "submit") -> Dict:
     """
     Run the complete 4-step GL journal import workflow
     Sends real-time WebSocket notifications for progress updates
@@ -373,7 +373,8 @@ def run_complete_workflow(file_path: str, Groupid: Optional[int] = None, transac
             step_name="Journal Upload to UCM",
             step_number=1,
             status="In Progress",
-            message=f"Uploading file {file_path} to UCM"
+            message=f"Uploading file {file_path} to UCM",
+            Action_Type=entry_type
         )
 
         upload_result = upload_file_to_ucm(file_path)
@@ -407,7 +408,9 @@ def run_complete_workflow(file_path: str, Groupid: Optional[int] = None, transac
             step_name="Interface Loader Submission",
             step_number=2,
             status="In Progress",
-            message=f"Submitting Interface Loader for Document ID {document_id}"
+            message=f"Submitting Interface Loader for Document ID {document_id}",
+            Action_Type=entry_type
+
         )
         load_result = submit_interface_loader(document_id)
         audit_interface_loader.request_id = load_result.get("request_id")
@@ -452,9 +455,15 @@ def run_complete_workflow(file_path: str, Groupid: Optional[int] = None, transac
             step_number=3,
             status="In Progress",
             message=f"Submitting Journal Import for Group ID {Groupid}",
-            group_id=Groupid
+            group_id=Groupid,
+            Action_Type=entry_type
+
         )
         import_result = submit_journal_import(document_id,Groupid=Groupid)
+
+
+
+        
         audit_journal_import.request_id = import_result.get("request_id")
         audit_journal_import.save()
         workflow_results["steps"].append({"step": "journal_import", "result": import_result})
@@ -485,7 +494,9 @@ def run_complete_workflow(file_path: str, Groupid: Optional[int] = None, transac
             step_name="Automatic Posting Submission",
             step_number=4,
             status="In Progress",
-            message="Submitting Automatic Posting"
+            message="Submitting Automatic Posting",
+            Action_Type=entry_type
+
         )
         post_result = submit_automatic_posting()
         audit_autopost.request_id = post_result.get("request_id")
@@ -521,7 +532,9 @@ def run_complete_workflow(file_path: str, Groupid: Optional[int] = None, transac
             step_number=5,
             status="Success",
             message="All steps completed successfully",
-            completed_at=timezone.now()
+            completed_at=timezone.now(),
+            Action_Type=entry_type
+
         )
         workflow_results["success"] = True
         workflow_results["message"] = "All steps completed successfully"

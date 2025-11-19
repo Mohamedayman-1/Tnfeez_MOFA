@@ -752,35 +752,29 @@ class transcationtransferapprovel_reject(APIView):
                         # Update the pivot fund
 
                         if Status == "approved":
-                         
-                          upload_result_journal, result_path_journal=create_and_upload_journal(transaction_id=transaction_id,transfers=trasfers,entry_type="reject")
-                          if upload_result_journal.get("success"):
-                             upload_result_budget, result_path_budget= create_and_upload_budget(transaction_id=transaction_id,transfers=trasfers,entry_type="rejected")
-                             if upload_result_budget.get("success"):
-                                    pass
-                             else:
-                                    pass
-                          else:
-                                pass
-                           
-                        #    upload_result, result_path= upload_journal_to_oracle.delay(
-                        #         transfers=trasfers,
-                        #         transaction_id=transaction_id,
-                        #         entry_type="rejected"
-                        #     )
-                        #    if upload_result.get("success"):
-                        #         upload_result, result_path= upload_budget_to_oracle.delay(
-                        #         transfers=trasfers,
-                        #         transaction_id=transaction_id,
-                        #         entry_type="rejected"
-                        #     )
+                            # Queue background task for Oracle upload
+                            upload_budget_to_oracle.delay(
+                                transaction_id=transaction_id,
+                                entry_type="Approve"
+                            )
+                            #  upload_result_journal, result_path_journal=create_and_upload_journal(transaction_id=transaction_id,transfers=trasfers,entry_type="reject")
+                            #  if upload_result_journal.get("success"):
+                            #     upload_result_budget, result_path_budget= create_and_upload_budget(transaction_id=transaction_id,transfers=trasfers,entry_type="Approve")
+                            #     if upload_result_budget.get("success"):
+                            #            pass
+                            #     else:
+                            #            pass
+                            #  else:
+                            #        return Response("Journal upload failed",status=status.HTTP_500_INTERNAL_SERVER_ERROR) 
+                                                            
+                            #if upload_result.get("success"):
 
-                        else:
-                            upload_result_journal, result_path_journal=create_and_upload_journal(transaction_id=transaction_id,transfers=trasfers,entry_type="reject")
-                            if upload_result_journal.get("success"):
-                                pass
-                            else:
-                                pass
+                            #else:
+                            #    upload_result_journal, result_path_journal=create_and_upload_journal(transaction_id=transaction_id,transfers=trasfers,entry_type="reject")
+                            #    if upload_result_journal.get("success"):
+                            #        pass
+                            #    else:
+                            #        pass
                              
                           
 
@@ -788,40 +782,40 @@ class transcationtransferapprovel_reject(APIView):
 
 
 
-                        #     if trasncation.code[0:3] != "AFR":
-                        #         csv_upload_result, result = create_and_upload_journal(
-                        #             transfers=trasfers,
-                        #             transaction_id=transaction_id,
-                        #             entry_type="reject",
-                        #         )
-                        #         response_data = {
-                        #             "message": "Transfers submitted for approval successfully",
-                        #             "transaction_id": transaction_id,
-                        #             "pivot_updates": pivot_updates,
-                        #             "journal_file": result if result else None,
-                        #         }
-                        #         if csv_upload_result:
-                        #             response_data["fbdi_upload_journal"] = (
-                        #                 csv_upload_result
-                        #             )
+                            #     if trasncation.code[0:3] != "AFR":
+                            #         csv_upload_result, result = create_and_upload_journal(
+                            #             transfers=trasfers,
+                            #             transaction_id=transaction_id,
+                            #             entry_type="reject",
+                            #         )
+                            #         response_data = {
+                            #             "message": "Transfers submitted for approval successfully",
+                            #             "transaction_id": transaction_id,
+                            #             "pivot_updates": pivot_updates,
+                            #             "journal_file": result if result else None,
+                            #         }
+                            #         if csv_upload_result:
+                            #             response_data["fbdi_upload_journal"] = (
+                            #                 csv_upload_result
+                            #             )
 
-                        #         results.append(response_data)
-                        #         print("start for 90 seconds")
-                        #         time.sleep(
-                        #             90
-                        #         )  # wait for 90 seconds before submitting budget
-                        #         print("wait for 90 seconds")
-                        #     submit_automatic_posting()
-                        #     time.sleep(
-                        #         10
-                        #     )  # wait for 10 seconds before submitting budget
-                        #     csv_upload_result, result = create_and_upload_budget(
-                        #         transfers=trasfers,
-                        #         transaction_id=transaction_id,
-                        #     )
-                        #     if csv_upload_result:
-                        #         response_data["fbdi_upload_budget"] = csv_upload_result
-                        # #   continue
+                            #         results.append(response_data)
+                            #         print("start for 90 seconds")
+                            #         time.sleep(
+                            #             90
+                            #         )  # wait for 90 seconds before submitting budget
+                            #         print("wait for 90 seconds")
+                            #     submit_automatic_posting()
+                            #     time.sleep(
+                            #         10
+                            #     )  # wait for 10 seconds before submitting budget
+                            #     csv_upload_result, result = create_and_upload_budget(
+                            #         transfers=trasfers,
+                            #         transaction_id=transaction_id,
+                            #     )
+                            #     if csv_upload_result:
+                            #         response_data["fbdi_upload_budget"] = csv_upload_result
+                            # #   continue
                         if Status == "rejected":
                             # if trasncation.code[0:3] != "AFR":
                             #     csv_upload_result, result = create_and_upload_journal(

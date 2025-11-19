@@ -383,6 +383,7 @@ class xx_budget_integration_audit(models.Model):
     # Step identification
     step_name = models.CharField(max_length=100)  # e.g., "UCM Upload", "Interface Loader"
     step_number = models.IntegerField()  # 1, 2, 3, 4...
+    Action_Type = models.CharField(max_length=100, null=True, blank=True)
     
     # Step details
     request_id = models.CharField(max_length=50, null=True, blank=True)
@@ -396,6 +397,7 @@ class xx_budget_integration_audit(models.Model):
     # Timestamps
     created_at = models.DateTimeField(auto_now_add=True)
     completed_at = models.DateTimeField(null=True, blank=True)
+    
 
     class Meta:
         db_table = "XX_BUDGET_INTEGRATION_AUDIT_XX"
