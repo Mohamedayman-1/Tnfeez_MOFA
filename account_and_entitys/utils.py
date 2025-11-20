@@ -6,6 +6,7 @@ DEPRECATION NOTICE:
 - Use OracleBalanceReportManager.get_balance_report_data() with dynamic segment_filters instead
 - Legacy function maintained for backward compatibility
 """
+import os
 import requests
 import base64
 import xml.etree.ElementTree as ET
@@ -64,8 +65,11 @@ def download_oracle_report(control_budget_name="MIC_HQ_MONTHLY", period_name="se
     """
     try:
         url = "https://hcbg-dev4.fa.ocs.oraclecloud.com:443/xmlpserver/services/ExternalReportWSSService"
-        username = "AFarghaly"
-        password = "Mubadala345"
+        username = os.getenv("FUSION_USER",)
+        password = os.getenv("FUSION_PASS",)
+        if not username or not password:
+            raise ValueError("FUSION_USER and FUSION_PASS environment variables must be set")
+        
 
         escaped_param = escape(control_budget_name)
         escaped_param2 = escape(period_name)

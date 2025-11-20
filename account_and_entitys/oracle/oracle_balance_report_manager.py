@@ -17,7 +17,7 @@ from decimal import Decimal, InvalidOperation
 from typing import Dict, List, Optional, Any
 from django.db import transaction
 
-from account_and_entitys.models import XX_SegmentType, XX_Segment
+from account_and_entitys.models import XX_SegmentType, XX_Segment,XX_Segment_Funds
 from account_and_entitys.oracle.oracle_segment_mapper import OracleSegmentMapper
 import os
 
@@ -40,8 +40,9 @@ class OracleBalanceReportManager:
     ORACLE_USERNAME = os.getenv("FUSION_USER", "AFarghaly")
     ORACLE_PASSWORD = os.getenv("FUSION_PASS", "Mubadala345")
     REPORT_PATH = "Custom/API/get_Ava_Fund_report.xdo"
-    Get_value_from_segment="Custom/API/Get_value_from_segment_report.xdo"
-    
+    Get_value_from_segment="Custom/API/Get Segments/Get_value_from_segment_report.xdo"
+    get_segment_fund="Custom/API/Get Segments funds/Balancess_Report.xdo"
+
     @staticmethod
     def get_balance_report_data(
         control_budget_name: str = "MIC_HQ_MONTHLY",
@@ -382,7 +383,7 @@ class OracleBalanceReportManager:
                                  # 11             # 9                   5
         control_budget_names = ["MOFA_BUDGET", "MOFA_COST_CENTER", "MOFA_GEOGRAPHIC_CLASS"]
         all_segment_values = set()  # Store unique segment values
-        from account_and_entitys.models import XX_SegmentType, XX_Segment  # Assuming models are in models.py
+
         
         try:
             # Get the segment type
@@ -594,4 +595,225 @@ class OracleBalanceReportManager:
             traceback.print_exc()
             return False
 
+    @staticmethod
+    def download_segments_funds(
+        control_budget_name: str = "MIC_HQ_MONTHLY",
+        period_name: str = "1-25",
+        custom_parameters: Optional[Dict[str, str]] = None,
+        save_path: Optional[str] = None
+    ) -> Dict[str, Any]:
+        """
+        Download funds data for specific segment values using custom SOAP parameters.
         
+        Args:
+            control_budget_name: Budget name
+            period_name: Period name
+            custom_parameters: Dict of {parameter_name: value} for any custom report parameters
+                              Example: {'P_SEGMENT1': 'E001', 'P_LEDGER_ID': '300000006508245'}
+            save_path: Optional path to save Excel file
+            
+        Returns:
+            dict: {
+                'success': bool,
+                'data': list of records (if parsing successful),
+                'excel_file': bytes (raw Excel data),
+                'message': str,
+                'file_path': str (if saved)
+            }
+        
+        Example:
+            >>> result = OracleBalanceReportManager.download_segments_funds(
+            ...     control_budget_name='MOFA_CASH',
+            ...     period_name='1-25',
+            ...     custom_parameters={
+            ...         'P_SEGMENT1': 'E001',
+            ...         'P_SEGMENT2': 'A100',
+            ...         'P_LEDGER_ID': '300000006508245'
+            ...     },
+            ...     save_path='funds_report.xlsx'
+            ... )
+        """
+        result = {
+            'success': False,
+            'data': None,
+            'excel_file': None,
+            'message': '',
+            'file_path': None
+        }
+        
+        try:
+            # Build parameters XML
+            parameters = []
+            
+            # Add budget name parameter
+            escaped_budget = escape(control_budget_name)
+            parameters.append(f"""
+               <pub:item>
+                  <pub:name>P_CONTROL_BUDGET_NAME</pub:name>
+                  <pub:values>
+                     <pub:item>{escaped_budget}</pub:item>
+                  </pub:values>
+               </pub:item>""")
+            
+            # Add period name parameter
+            escaped_period = escape(period_name)
+            parameters.append(f"""
+               <pub:item>
+                  <pub:name>P_PERIOD_NAME</pub:name>
+                  <pub:values>
+                     <pub:item>{escaped_period}</pub:item>
+                  </pub:values>
+               </pub:item>""")
+            
+            # Add any custom parameters
+            if custom_parameters:
+                for param_name, param_value in custom_parameters.items():
+                    escaped_value = escape(str(param_value))
+                    parameters.append(f"""
+               <pub:item>
+                  <pub:name>{param_name}</pub:name>
+                  <pub:values>
+                     <pub:item>{escaped_value}</pub:item>
+                  </pub:values>
+               </pub:item>""")
+            
+            parameters_xml = "".join(parameters)
+            
+            # Build SOAP envelope
+            soap_body = f"""<?xml version="1.0" encoding="UTF-8"?>
+<soap12:Envelope xmlns:soap12="http://www.w3.org/2003/05/soap-envelope"
+               xmlns:pub="http://xmlns.oracle.com/oxp/service/PublicReportService">
+   <soap12:Header/>
+   <soap12:Body>
+      <pub:runReport>
+         <pub:reportRequest>
+            <pub:reportAbsolutePath>{OracleBalanceReportManager.get_segment_fund}</pub:reportAbsolutePath>
+            <pub:attributeFormat>xlsx</pub:attributeFormat>
+            <pub:sizeOfDataChunkDownload>-1</pub:sizeOfDataChunkDownload>
+            <pub:parameterNameValues>{parameters_xml}
+            </pub:parameterNameValues>
+         </pub:reportRequest>
+      </pub:runReport>
+   </soap12:Body>
+</soap12:Envelope>
+"""
+            
+            headers = {"Content-Type": "application/soap+xml;charset=UTF-8"}
+            
+            print(f"🔍 Downloading Oracle report...")
+            print(f"   Budget: {control_budget_name}, Period: {period_name}")
+            if custom_parameters:
+                print(f"   Custom Parameters: {custom_parameters}")
+            
+            # Call Oracle SOAP service
+            response = requests.post(
+                OracleBalanceReportManager.ORACLE_URL,
+                data=soap_body.encode('utf-8'),
+                headers=headers,
+                auth=(OracleBalanceReportManager.ORACLE_USERNAME, OracleBalanceReportManager.ORACLE_PASSWORD)
+            )
+            
+            if response.status_code != 200:
+                result['message'] = f"HTTP Error {response.status_code}"
+                print(f"❌ {result['message']}")
+                print(f"Response: {response.text}")
+                return result
+            
+            # Parse SOAP response
+            ns = {
+                "soap12": "http://www.w3.org/2003/05/soap-envelope",
+                "pub": "http://xmlns.oracle.com/oxp/service/PublicReportService"
+            }
+            root = ET.fromstring(response.text)
+            report_bytes_element = root.find(".//pub:reportBytes", ns)
+            
+            if report_bytes_element is None or not report_bytes_element.text:
+                result['message'] = "No report data found in Oracle response"
+                print(f"❌ {result['message']}")
+                return result
+            
+            # Decode Excel data
+            excel_data = base64.b64decode(report_bytes_element.text)
+            result['excel_file'] = excel_data
+            print(f"✅ Downloaded Excel file ({len(excel_data)} bytes)")
+            
+            # Try to parse Excel into DataFrame
+            try:
+                # Header is always at row 2 (0-indexed, so header=2)
+                # Read all SEGMENT columns as strings to preserve leading zeros
+                segment_dtypes = {f'SEGMENT{i}': str for i in range(1, 31)}
+                df = pd.read_excel(io.BytesIO(excel_data), header=1, engine='openpyxl', dtype=segment_dtypes)
+                
+                # Clean column names
+                df.columns = df.columns.str.strip()
+                
+                # Convert to list of dicts
+                result['data'] = df.to_dict('records')
+                print(f"✅ Parsed {len(result['data'])} records from Excel (header at row 2)")
+                print(f"📋 Columns: {list(df.columns)}")
+
+                for idx, row in enumerate(result['data']):
+                    # Collect all 30 segments into a dictionary
+                    if row.get('SEGMENT1') is not None:
+                        Segment5=str(row.get('SEGMENT1'))
+                    if row.get('SEGMENT2') is not None:
+                        Segment9=str(row.get('SEGMENT2'))
+                    if row.get('SEGMENT3') is not None: 
+                        Segment11=str(row.get('SEGMENT3'))
+                    
+                    # Get other columns
+                    control_budget = row.get('CONTROL_BUDGET_NAME')
+                    period = row.get('PERIOD_NAME')
+                    encumbrance_ptd = row.get('ENCUMBRANCE_PTD')
+                    other_ytd = row.get('OTHER_PTD')
+                    actual_ytd = row.get('ACTUAL_PTD')
+                    funds_available = row.get('FUNDS_AVAILABLE_PTD')
+                    budget_ytd = row.get('BUDGET_PTD')
+                    commitment_ptd = row.get('COMMITMENT_PTD')
+                    
+                    # Create database record
+                    try:
+                        XX_Segment_Funds.objects.create(
+                            Segment11=Segment11,
+                            Segment9=Segment9,
+                            Segment5=Segment5,
+                            CONTROL_BUDGET_NAME=control_budget,
+                            PERIOD_NAME=period,
+                            FUNDS_AVAILABLE_PTD=funds_available,
+                            COMMITMENT_PTD=commitment_ptd,
+                            OTHER_PTD=other_ytd,
+                            ACTUAL_PTD=actual_ytd,
+                            BUDGET_PTD=budget_ytd,
+                            ENCUMBRANCE_PTD=encumbrance_ptd,
+                        )
+                        print(f"✅ Created fund record {idx + 1}")
+                    except Exception as e:
+                        print(f"⚠️  Could not create fund record {idx + 1}: {e}")
+
+
+                
+            except Exception as parse_error:
+                print(f"⚠️  Could not parse Excel automatically: {parse_error}")
+                result['data'] = None
+            
+            # Save to file if path provided
+            if save_path:
+                with open(save_path, 'wb') as f:
+                    f.write(excel_data)
+                result['file_path'] = save_path
+                print(f"💾 Saved Excel file to: {save_path}")
+            
+            result['success'] = True
+            result['message'] = 'Report downloaded successfully'
+            
+            return result
+            
+        except Exception as e:
+            result['message'] = f"Error downloading report: {str(e)}"
+            print(f"❌ {result['message']}")
+            import traceback
+            traceback.print_exc()
+            return result
+
+
+            

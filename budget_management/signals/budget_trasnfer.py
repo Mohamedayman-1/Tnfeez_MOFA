@@ -69,11 +69,6 @@ def budget_transfer_post_delete(sender, instance, **kwargs):
 
 
 
-
-
-
-
-
 @receiver(post_save, sender=xx_BudgetTransfer)
 def Run_oracle_upload_journal_workflow(sender, instance, created, **kwargs):
     """

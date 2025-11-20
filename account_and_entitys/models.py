@@ -1295,6 +1295,70 @@ class XX_Segment(models.Model):
         return descendants
 
 
+class XX_Segment_Funds(models.Model):
+    """
+    Oracle Segment Funds model with 30 segments and 7 additional columns.
+    Stores financial data with flexible segment structure.
+    """
+    id = models.AutoField(primary_key=True)
+    Segment1 = models.CharField(max_length=50, null=True, blank=True, help_text="Segment 1")
+    Segment2 = models.CharField(max_length=50, null=True, blank=True, help_text="Segment 2")
+    Segment3 = models.CharField(max_length=50, null=True, blank=True, help_text="Segment 3")
+    Segment4 = models.CharField(max_length=50, null=True, blank=True, help_text="Segment 4")
+    Segment5 = models.CharField(max_length=50, null=True, blank=True, help_text="Segment 5")
+    Segment6 = models.CharField(max_length=50, null=True, blank=True, help_text="Segment 6")
+    Segment7 = models.CharField(max_length=50, null=True, blank=True, help_text="Segment 7")
+    Segment8 = models.CharField(max_length=50, null=True, blank=True, help_text="Segment 8")
+    Segment9 = models.CharField(max_length=50, null=True, blank=True, help_text="Segment 9")
+    Segment10 = models.CharField(max_length=50, null=True, blank=True, help_text="Segment 10")
+    Segment11 = models.CharField(max_length=50, null=True, blank=True, help_text="Segment 11")
+    Segment12 = models.CharField(max_length=50, null=True, blank=True, help_text="Segment 12")
+    Segment13 = models.CharField(max_length=50, null=True, blank=True, help_text="Segment 13")
+    Segment14 = models.CharField(max_length=50, null=True, blank=True, help_text="Segment 14")
+    Segment15 = models.CharField(max_length=50, null=True, blank=True, help_text="Segment 15")
+    Segment16 = models.CharField(max_length=50, null=True, blank=True, help_text="Segment 16")
+    Segment17 = models.CharField(max_length=50, null=True, blank=True, help_text="Segment 17")
+    Segment18 = models.CharField(max_length=50, null=True, blank=True, help_text="Segment 18")
+    Segment19 = models.CharField(max_length=50, null=True, blank=True, help_text="Segment 19")
+    Segment20 = models.CharField(max_length=50, null=True, blank=True, help_text="Segment 20")
+    Segment21 = models.CharField(max_length=50, null=True, blank=True, help_text="Segment 21")
+    Segment22 = models.CharField(max_length=50, null=True, blank=True, help_text="Segment 22")
+    Segment23 = models.CharField(max_length=50, null=True, blank=True, help_text="Segment 23")
+    Segment24 = models.CharField(max_length=50, null=True, blank=True, help_text="Segment 24")
+    Segment25 = models.CharField(max_length=50, null=True, blank=True, help_text="Segment 25")
+    Segment26 = models.CharField(max_length=50, null=True, blank=True, help_text="Segment 26")
+    Segment27 = models.CharField(max_length=50, null=True, blank=True, help_text="Segment 27")
+    Segment28 = models.CharField(max_length=50, null=True, blank=True, help_text="Segment 28")
+    Segment29 = models.CharField(max_length=50, null=True, blank=True, help_text="Segment 29")
+    Segment30 = models.CharField(max_length=50, null=True, blank=True, help_text="Segment 30")
+    
+    # 7 Additional columns (rename as needed)
+    CONTROL_BUDGET_NAME = models.CharField(max_length=100, null=True, blank=True, help_text="CONTROL_BUDGET_NAME")
+    ENCUMBRANCE_PTD = models.DecimalField(max_digits=20, decimal_places=2, null=True, blank=True, help_text="encumbrance_ptd")
+    PERIOD_NAME = models.CharField(max_length=100, null=True, blank=True, help_text="PERIOD_NAME")
+    FUNDS_AVAILABLE_PTD = models.DecimalField(max_digits=20, decimal_places=2, null=True, blank=True, help_text="FUNDS_AVAILABLE_PTD")
+    COMMITMENT_PTD = models.DecimalField(max_digits=20, decimal_places=2, null=True, blank=True, help_text="COMMITMENT_PTD")
+    OBLIGATION_PTD = models.DecimalField(max_digits=20, decimal_places=2, null=True, blank=True, help_text="OBLIGATION_PTD")
+    OTHER_PTD = models.DecimalField(max_digits=20, decimal_places=2, null=True, blank=True, help_text="OTHER_PTD")
+    ACTUAL_PTD = models.DecimalField(max_digits=20, decimal_places=2, null=True, blank=True, help_text="ACTUAL_PTD")
+    BUDGET_PTD= models.DecimalField(max_digits=20, decimal_places=2, null=True, blank=True, help_text="BUDGET_PTD")
+    
+    # Metadata
+    created_at = models.DateTimeField(auto_now_add=True)
+    
+    class Meta:
+        db_table = "XX_SEGMENT_FUNDS_XX"
+        verbose_name = "Segment Funds"
+        verbose_name_plural = "Segment Funds"
+        indexes = [
+            models.Index(fields=["Segment1", "Segment2", "Segment3"]),
+        ]
+    
+    def __str__(self):
+        segments = [getattr(self, f"Segment{i}") for i in range(1, 31) if getattr(self, f"Segment{i}")]
+        return f"Segment Funds {self.id}: {' / '.join(segments[:3])}"
+
+
 class XX_TransactionSegment(models.Model):
     """
     Links transaction transfers to their segment values.

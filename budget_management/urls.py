@@ -5,6 +5,7 @@ from .views import (
     ListBudgetTransferView,
     ApproveBudgetTransferView,
     GetBudgetTransferView,
+    Oracle_Status,
     UpdateBudgetTransferView,
     DeleteBudgetTransferView,
     transcationtransferapprovel_reject,
@@ -98,4 +99,6 @@ urlpatterns = [
         DashboardBudgetTransferView.as_view(),
         name="dashboard-budget-transfer",
     ),
+
+    path("transfers/Oracle/Status/", Oracle_Status.as_view(), name="transaction-mobile-approve-reject"),
 ]

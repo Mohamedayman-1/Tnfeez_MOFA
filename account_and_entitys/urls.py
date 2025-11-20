@@ -14,7 +14,6 @@ from .views import (
     SegmentUpdateView,
     SegmentDeleteView,
     SegmentBulkUploadView,
-    Download_segment_values_from_oracle,
     AccountWiseDashboardView,
     PivotFundListView,
     PivotFundCreateView,
@@ -43,6 +42,11 @@ from .views import (
     UploadMappingExcelView,
     EntityMappingListView,
     ActiveProjectsWithEnvelopeView,
+)
+from .oracle.view import (
+
+    Download_segment_values_from_oracle,
+    Download_segment_Funds,
 )
 
 # Import Phase 3 views
@@ -94,9 +98,7 @@ urlpatterns = [
     # PivotFund URLs
     path("pivot-funds/", PivotFundListView.as_view(), name="pivotfund-list"),
     path("pivot-funds/create/", PivotFundCreateView.as_view(), name="pivotfund-create"),
-    path(
-        "pivot-funds/getdetail/", PivotFundDetailView.as_view(), name="pivotfund-detail"
-    ),
+    path("pivot-funds/getdetail/", PivotFundDetailView.as_view(), name="pivotfund-detail"),
     path(
         "pivot-funds/<int:pk>/update/",
         PivotFundUpdateView.as_view(),
@@ -273,7 +275,7 @@ urlpatterns = [
     path("segment-types/<int:pk>/update/", SegmentTypeUpdateView.as_view(), name="segment-type-update"),
     path("segment-types/<int:pk>/delete/", SegmentTypeDeleteView.as_view(), name="segment-type-delete"),
 
-    path("segments/load_from_oracle/", Download_segment_values_from_oracle.as_view(), name="segment-create"),
+    
     
     # Main unified CRUD endpoints for all segment types
     path("segments/", SegmentListView.as_view(), name="segment-list"),
@@ -284,4 +286,14 @@ urlpatterns = [
     
     # Unified bulk upload endpoint (works with any segment type)
     path("segments/upload/", SegmentBulkUploadView.as_view(), name="segment-bulk-upload"),
+
+
+
+       #oracle apis for data fetch
+       path("segments/load_Segments_oracle/", Download_segment_values_from_oracle.as_view(), name="segment-create"),
+       path("segments/load_Segments_oracle/Funds/", Download_segment_Funds.as_view(), name="segment-create"),
+  
+
+
+
 ]

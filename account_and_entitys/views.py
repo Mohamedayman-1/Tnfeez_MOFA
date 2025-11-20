@@ -53,6 +53,7 @@ from .utils import get_oracle_report_data, get_mapping_for_fusion_data
 from .oracle.oracle_balance_report_manager import OracleBalanceReportManager
 
 
+
 class EntityPagination(PageNumberPagination):
     """Pagination class for entities and accounts"""
 
@@ -1082,29 +1083,6 @@ class SegmentBulkUploadView(APIView):
                 status=status.HTTP_400_BAD_REQUEST,
             )
         
-class Download_segment_values_from_oracle(APIView):
-    """Download segment values from Oracle and update local XX_Segment table dynamically
-    
-    Query Parameters:
-    - segment_type: REQUIRED - Segment type ID or name (e.g., 1, 2, 3, "Account", "Project")
-    
-    Features:
-    - Works with any segment type (not limited to 3)
-    - Fetches segments from Oracle via stored procedure
-    - Upserts segments into local XX_Segment table
-    """
-
-    permission_classes = [IsAuthenticated]
-
-    def get(self, request):
-       
-        oracle_maanger=OracleBalanceReportManager()
-
-        oracle_maanger.download_segment_values_and_load_to_database(1)
-        
-    
-
-        return Response("done")
 
 
 # PivotFund views

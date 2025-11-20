@@ -24,11 +24,12 @@ from .models import (
     xx_BudgetTransfer,
     xx_BudgetTransferAttachment,
     xx_BudgetTransferRejectReason,
+    xx_budget_integration_audit,
     xx_DashboardBudgetTransfer,
 )
 from account_and_entitys.models import XX_PivotFund, XX_Entity, XX_Account
 from transaction.models import xx_TransactionTransfer
-from .serializers import BudgetTransferSerializer
+from .serializers import BudgetIntegrationAuditSerializer, BudgetTransferSerializer
 from user_management.permissions import IsAdmin, CanTransferBudget
 from budget_transfer.global_function.dashbaord import (
     get_all_dashboard_data,
@@ -757,96 +758,14 @@ class transcationtransferapprovel_reject(APIView):
                                 transaction_id=transaction_id,
                                 entry_type="Approve"
                             )
-                            #  upload_result_journal, result_path_journal=create_and_upload_journal(transaction_id=transaction_id,transfers=trasfers,entry_type="reject")
-                            #  if upload_result_journal.get("success"):
-                            #     upload_result_budget, result_path_budget= create_and_upload_budget(transaction_id=transaction_id,transfers=trasfers,entry_type="Approve")
-                            #     if upload_result_budget.get("success"):
-                            #            pass
-                            #     else:
-                            #            pass
-                            #  else:
-                            #        return Response("Journal upload failed",status=status.HTTP_500_INTERNAL_SERVER_ERROR) 
-                                                            
-                            #if upload_result.get("success"):
 
-                            #else:
-                            #    upload_result_journal, result_path_journal=create_and_upload_journal(transaction_id=transaction_id,transfers=trasfers,entry_type="reject")
-                            #    if upload_result_journal.get("success"):
-                            #        pass
-                            #    else:
-                            #        pass
-                             
-                          
-
-
-
-
-
-                            #     if trasncation.code[0:3] != "AFR":
-                            #         csv_upload_result, result = create_and_upload_journal(
-                            #             transfers=trasfers,
-                            #             transaction_id=transaction_id,
-                            #             entry_type="reject",
-                            #         )
-                            #         response_data = {
-                            #             "message": "Transfers submitted for approval successfully",
-                            #             "transaction_id": transaction_id,
-                            #             "pivot_updates": pivot_updates,
-                            #             "journal_file": result if result else None,
-                            #         }
-                            #         if csv_upload_result:
-                            #             response_data["fbdi_upload_journal"] = (
-                            #                 csv_upload_result
-                            #             )
-
-                            #         results.append(response_data)
-                            #         print("start for 90 seconds")
-                            #         time.sleep(
-                            #             90
-                            #         )  # wait for 90 seconds before submitting budget
-                            #         print("wait for 90 seconds")
-                            #     submit_automatic_posting()
-                            #     time.sleep(
-                            #         10
-                            #     )  # wait for 10 seconds before submitting budget
-                            #     csv_upload_result, result = create_and_upload_budget(
-                            #         transfers=trasfers,
-                            #         transaction_id=transaction_id,
-                            #     )
-                            #     if csv_upload_result:
-                            #         response_data["fbdi_upload_budget"] = csv_upload_result
-                            # #   continue
                         if Status == "rejected":
-                            # if trasncation.code[0:3] != "AFR":
-                            #     csv_upload_result, result = create_and_upload_journal(
-                            #         transfers=trasfers,
-                            #         transaction_id=transaction_id,
-                            #         entry_type="reject",
-                            #     )
-                            #     wait_for_job()
-                            #     time.sleep(90)
-                            #     submit_automatic_posting()
-                            #     response_data = {
-                            #         "message": "Transfers submitted for approval successfully",
-                            #         "transaction_id": transaction_id,
-                            #         "pivot_updates": pivot_updates,
-                            #         "journal_file": result if result else None,
-                            #     }
-                            #     if csv_upload_result:
-                            #         response_data["fbdi_upload"] = csv_upload_result
+                         upload_journal_to_oracle.delay(
+                                transaction_id=transaction_id,
+                                entry_type="Reject"
+                            )
 
-                            #     results.append(response_data)
-
-                        # update_result = update_pivot_fund(
-                        #     transfer.cost_center_code,
-                        #     transfer.account_code,
-                        #     transfer.project_code,
-                        #     transfer.from_center or 0,
-                        #     transfer.to_center or 0,
-                        #     Status,
-                        # )
-                        # if update_result:
-                        #     pivot_updates.append(update_result)
+                       
                          pass
                     except Exception as e:
                         pivot_updates.append(
@@ -858,17 +777,7 @@ class transcationtransferapprovel_reject(APIView):
                         continue
 
                         # Add the result for this transaction
-                    results.append(
-                        {
-                            "transaction_id": transaction_id,
-                            "status": Status,
-                            "status_level": trasncation.status_level,
-                            "pivot_updates": pivot_updates,
-                        }
-                    )
-                    trasncation.status = (
-                        "rejected" if Status == "rejected" else "approved"
-                    )
+                    
                     trasncation.save()
             except xx_BudgetTransfer.DoesNotExist:
                 results.append(
@@ -886,8 +795,6 @@ class transcationtransferapprovel_reject(APIView):
                         "message": str(e),
                     }
                 )
-
-        # Return all results
         return Response(
             {"message": "Transfers processed", "results": results},
             status=status.HTTP_200_OK,
@@ -1697,3 +1604,26 @@ class Approval_Status(APIView):
             },
             status=status.HTTP_200_OK,
         )
+
+
+
+
+
+
+class Oracle_Status(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        try:
+
+            transaction_id = request.query_params.get("transaction_id", None)
+            Trasncations_Audti = xx_budget_integration_audit.objects.filter(
+                transaction_id=transaction_id
+            )
+            serializer = BudgetIntegrationAuditSerializer(Trasncations_Audti, many=True)
+            return Response(serializer.data, status=status.HTTP_200_OK)
+
+        except xx_BudgetTransfer.DoesNotExist:
+            return Response(
+                {"error": "Transfer not found"}, status=status.HTTP_404_NOT_FOUND
+            )
