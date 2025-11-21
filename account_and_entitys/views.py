@@ -90,11 +90,31 @@ class SegmentTypesListView(APIView):
             types_data.append({
                 "segment_id": seg_type.segment_id,
                 "segment_name": seg_type.segment_name,
+                "segment_type": seg_type.segment_type,  # same as name for now
+                "segment_type_oracle_number": seg_type.oracle_segment_number if hasattr(seg_type, 'oracle_segment_number') else None,
+                "segment_type_is_required": seg_type.is_required if hasattr(seg_type, 'is_required') else None,
+                "segment_type_has_hierarchy": seg_type.has_hierarchy if hasattr(seg_type, 'has_hierarchy') else None,
+                "segment_type_display_order": seg_type.display_order if hasattr(seg_type, 'display_order') else None,
+                "segment_type_status": "Active" if seg_type.is_active else "Inactive" if hasattr(seg_type, 'is_active') else "Unknown", 
                 "description": seg_type.description if hasattr(seg_type, 'description') else None,
                 "total_segments": segment_count,
-                "endpoint_example": f"/api/accounts-entities/segments/?segment_type={seg_type.segment_id}",
-                "endpoint_by_name": f"/api/accounts-entities/segments/?segment_type={seg_type.segment_name}"
             })
+
+                    # segmant name 
+                    
+                    # srgmant type 
+                    
+                    # Oracle Segment #
+                    
+                    # Required= true or false 
+                    
+                    # Has Hierarchy = true or false 
+                    
+                    # Display Order
+                    
+                    # Status
+ 
+            
         
         return Response(
             {
@@ -103,6 +123,7 @@ class SegmentTypesListView(APIView):
                 "data": types_data
             }
         )
+    
 
 
 class SegmentTypeCreateView(APIView):
@@ -224,8 +245,13 @@ class SegmentTypeUpdateView(APIView):
     Supports updating:
     - segment_name (must remain unique)
     - description
+    - oracle_segment_number
+    - is_required
+    - has_hierarchy
+    - display_order
+    - is_active
     
-    Note: segment_id cannot be changed as it's the primary key
+    Note: segment_id cannot be changed as it's the primary key (auto-generated)
     """
     
     permission_classes = [IsAuthenticated]
@@ -257,9 +283,24 @@ class SegmentTypeUpdateView(APIView):
             
             segment_type.segment_name = new_name
         
-        # Update description if provided
+        # Update all other fields if provided
         if "description" in request.data:
             segment_type.description = request.data.get("description")
+        
+        if "oracle_segment_number" in request.data:
+            segment_type.oracle_segment_number = request.data.get("oracle_segment_number")
+        
+        if "is_required" in request.data:
+            segment_type.is_required = request.data.get("is_required")
+        
+        if "has_hierarchy" in request.data:
+            segment_type.has_hierarchy = request.data.get("has_hierarchy")
+        
+        if "display_order" in request.data:
+            segment_type.display_order = request.data.get("display_order")
+        
+        if "is_active" in request.data:
+            segment_type.is_active = request.data.get("is_active")
         
         try:
             segment_type.save()
@@ -270,7 +311,12 @@ class SegmentTypeUpdateView(APIView):
                     "data": {
                         "segment_id": segment_type.segment_id,
                         "segment_name": segment_type.segment_name,
-                        "description": segment_type.description if hasattr(segment_type, 'description') else None
+                        "description": segment_type.description if hasattr(segment_type, 'description') else None,
+                        "oracle_segment_number": segment_type.oracle_segment_number if hasattr(segment_type, 'oracle_segment_number') else None,
+                        "is_required": segment_type.is_required if hasattr(segment_type, 'is_required') else None,
+                        "has_hierarchy": segment_type.has_hierarchy if hasattr(segment_type, 'has_hierarchy') else None,
+                        "display_order": segment_type.display_order if hasattr(segment_type, 'display_order') else None,
+                        "is_active": segment_type.is_active if hasattr(segment_type, 'is_active') else None
                     }
                 }
             )

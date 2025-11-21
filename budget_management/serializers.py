@@ -43,8 +43,9 @@ class BudgetIntegrationAuditSerializer(serializers.ModelSerializer):
         is_complete = False
         
         for audit in all_steps:
-            step_key = f"step{audit.step_number}"
+            step_key = f"step_{audit.Action_Type}"
             steps[step_key] = {
+
                 "step_name": audit.step_name,
                 "status": audit.status,
                 "message": audit.message,
@@ -52,6 +53,7 @@ class BudgetIntegrationAuditSerializer(serializers.ModelSerializer):
                 "document_id": audit.document_id,
                 "started_at": audit.created_at,
                 "completed_at": audit.completed_at,
+                "step_action": audit.Action_Type,
             }
             
             # Track current step (last non-completed or in-progress)

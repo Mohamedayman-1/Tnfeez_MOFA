@@ -9,6 +9,7 @@ Phase 5: Oracle Fusion Integration Update
 
 import base64
 import io
+import numpy as np
 import pandas as pd
 import requests
 import xml.etree.ElementTree as ET
@@ -370,7 +371,7 @@ class OracleBalanceReportManager:
             return False
 
     @staticmethod
-    def download_segment_values_and_load_to_database(segment_type_id: int) -> bool:
+    def download_segment_values_and_load_to_database(segment_type_id: int) -> Dict[str, Any]:
         """
         Download segment values from Oracle reports and load to database.
         
@@ -378,11 +379,29 @@ class OracleBalanceReportManager:
             segment_type_id: The segment type ID to download values for
             
         Returns:
-            bool: True if successful
+            dict: {
+                'success': bool,
+                'data': list of created records,
+                'message': str,
+                'total_records': int,
+                'created_count': int,
+                'skipped_count': int
+            }
         """
+        result = {
+            'success': False,
+            'data': [],
+            'message': '',
+            'total_records': 0,
+            'created_count': 0,
+            'skipped_count': 0
+        }
+        
                                  # 11             # 9                   5
         control_budget_names = ["MOFA_BUDGET", "MOFA_COST_CENTER", "MOFA_GEOGRAPHIC_CLASS"]
         all_segment_values = set()  # Store unique segment values
+        total_created = 0
+        total_skipped = 0
 
         
         try:
@@ -392,8 +411,9 @@ class OracleBalanceReportManager:
                 oracle_field_num = OracleSegmentMapper.get_oracle_field_number(segment_type_id)
                 print(f"🔍 Downloading values for segment type: {segment_type.segment_name} (Oracle field: SEGMENT{oracle_field_num})")
             except XX_SegmentType.DoesNotExist:
-                print(f"❌ Segment type {segment_type_id} does not exist")
-                return False
+                result['message'] = f"Segment type {segment_type_id} does not exist"
+                print(f"❌ {result['message']}")
+                return result
             
             # Iterate through each control budget name
             for control_budget in control_budget_names:
@@ -565,35 +585,50 @@ class OracleBalanceReportManager:
                             segment_type=5
 
                         try:
-                            XX_Segment.objects.create(
+                            segment_obj = XX_Segment.objects.create(
                                 code=code,
                                 segment_type_id=segment_type,
                                 parent_code=parent_code,
                                 alias=description,
                                 level=level,
-
                             )
                             Created += 1
+                            total_created += 1
+                            
+                            # Clean data for JSON serialization - replace NaN with None
+                            result['data'].append({
+                                'code': str(code) if code is not None else None,
+                                'segment_type': int(segment_type) if segment_type is not None else None,
+                                'alias': str(description) if description and str(description) != 'nan' else None,
+                                'control_budget': str(control_budget) if control_budget is not None else None
+                            })
                             print(f"   ✅ Created segment {code}")
 
                         except Exception as e:
+                            total_skipped += 1
                             print(f"   ⚠️  Could not create segment {code}: {e}")
-                        
-
-                        Created += 1
                     
                 
                 print(f"   📊 Found {len(records_array)} records, {Created} matched filters (SUMMARY_FLAG=N, ENABLED_FLAG=Y, date active)")
 
-
-
-            return True
+            # Summary
+            result['success'] = True
+            result['total_records'] = len(all_segment_values)
+            result['created_count'] = total_created
+            result['skipped_count'] = total_skipped
+            result['message'] = f'Successfully processed {total_created} segments from {len(control_budget_names)} control budgets'
+            
+            print(f"\n✅ Total unique segment values collected: {len(all_segment_values)}")
+            print(f"✅ Created: {total_created}, Skipped: {total_skipped}")
+            print(f"✅ Successfully processed all control budgets")
+            return result
             
         except Exception as e:
-            print(f"❌ Error downloading segment values: {str(e)}")
+            result['message'] = f"Error downloading segment values: {str(e)}"
+            print(f"❌ {result['message']}")
             import traceback
             traceback.print_exc()
-            return False
+            return result
 
     @staticmethod
     def download_segments_funds(
@@ -746,6 +781,9 @@ class OracleBalanceReportManager:
                 
                 # Clean column names
                 df.columns = df.columns.str.strip()
+                
+                # Replace NaN with None for JSON compatibility
+                df = df.replace({pd.NA: None, pd.NaT: None, np.nan: None})
                 
                 # Convert to list of dicts
                 result['data'] = df.to_dict('records')

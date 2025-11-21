@@ -164,13 +164,15 @@ class SegmentValueListSerializer(serializers.ModelSerializer):
         model = XX_Segment
         fields = [
             'id',
+            'segment_type',
             'segment_type_name',
             'code',
             'alias',
             'parent_code',
             'level',
-            'envelope_amount',
-            'is_active'
+            'is_active',
+            'created_at',
+            'updated_at'
         ]
 
 

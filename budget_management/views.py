@@ -195,7 +195,7 @@ class ListBudgetTransferView(APIView):
             code_upper = code.upper()
             transfers = transfers.filter(type=code_upper)
 
-        if request.user.abilities.count() > 0:
+        if request.user.abilities_legacy.count() > 0:
             transfers = filter_budget_transfers_all_in_entities(
                 budget_transfers=transfers, user=request.user, Type="edit"
             )
@@ -387,7 +387,7 @@ class ListBudgetTransfer_approvels_View(APIView):
         # )
         transfers = ApprovalManager.get_user_pending_approvals(request.user)
 
-        if request.user.abilities.count() > 0:
+        if request.user.abilities_legacy.count() > 0:
             transfers = filter_budget_transfers_all_in_entities(
                 transfers, request.user, "approve"
             )
@@ -758,15 +758,24 @@ class transcationtransferapprovel_reject(APIView):
                                 transaction_id=transaction_id,
                                 entry_type="Approve"
                             )
+                            results.append({
+                                "transaction_id": transaction_id,
+                                "status": "success",
+                                "message": "Transaction approved successfully"
+                        })
+
 
                         if Status == "rejected":
-                         upload_journal_to_oracle.delay(
-                                transaction_id=transaction_id,
-                                entry_type="Reject"
-                            )
-
-                       
-                         pass
+                            upload_journal_to_oracle.delay(
+                                    transaction_id=transaction_id,
+                                    entry_type="reject"
+                                )
+                        results.append({
+                                "transaction_id": transaction_id,
+                                "status": "success",
+                                "message": "Transaction rejected successfully"
+                        })
+                    
                     except Exception as e:
                         pivot_updates.append(
                             {
@@ -1124,7 +1133,7 @@ class DashboardBudgetTransferView(APIView):
                 "code", "status", "status_level", "request_date", "transaction_date"
             )
             print(len(transfers_queryset))
-            if request.user.abilities.count() > 0:
+            if request.user.abilities_legacy.count() > 0:
                 transfers_queryset = filter_budget_transfers_all_in_entities(
                     transfers_queryset,
                     request.user,
@@ -1415,7 +1424,7 @@ class ListBudgetTransfer_approvels_MobileView(APIView):
         )
         transfers = ApprovalManager.get_user_pending_approvals(request.user)
 
-        if request.user.abilities.count() > 0:
+        if request.user.abilities_legacy.count() > 0:
             transfers = filter_budget_transfers_all_in_entities(
                 transfers, request.user, "approve"
             )
@@ -1615,15 +1624,55 @@ class Oracle_Status(APIView):
 
     def get(self, request):
         try:
-
             transaction_id = request.query_params.get("transaction_id", None)
-            Trasncations_Audti = xx_budget_integration_audit.objects.filter(
+            
+            if not transaction_id:
+                return Response(
+                    {"error": "transaction_id is required"}, 
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+            
+            audit_records = xx_budget_integration_audit.objects.filter(
                 transaction_id=transaction_id
-            )
-            serializer = BudgetIntegrationAuditSerializer(Trasncations_Audti, many=True)
-            return Response(serializer.data, status=status.HTTP_200_OK)
-
-        except xx_BudgetTransfer.DoesNotExist:
+            ).order_by('step_number')
+            
+            # Group records by Action_Type
+            grouped_data = {}
+            for record in audit_records:
+                action_type = record.Action_Type or "Unknown"
+                
+                if action_type not in grouped_data:
+                    grouped_data[action_type] = {
+                        "action_type": action_type,
+                        "steps": []
+                    }
+                
+                grouped_data[action_type]["steps"].append({
+                    "step_number": record.step_number,
+                    "step_name": record.step_name,
+                    "status": record.status,
+                    "message": record.message,
+                    "request_id": record.request_id,
+                    "document_id": record.document_id,
+                    "group_id": record.group_id,
+                    "created_at": record.created_at,
+                    "completed_at": record.completed_at
+                })
+            
+            # Convert to list and maintain order
+            action_groups = list(grouped_data.values())
+            
             return Response(
-                {"error": "Transfer not found"}, status=status.HTTP_404_NOT_FOUND
+                {
+                    "transaction_id": transaction_id,
+                    "total_records": audit_records.count(),
+                    "action_groups": action_groups
+                },
+                status=status.HTTP_200_OK
+            )
+
+        except Exception as e:
+            return Response(
+                {"error": str(e)}, 
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
             )
