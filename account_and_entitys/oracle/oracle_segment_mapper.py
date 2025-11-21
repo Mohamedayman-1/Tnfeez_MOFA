@@ -323,6 +323,7 @@ class OracleSegmentMapper:
             segment_field = f'Segment{i}'
             if segment_field not in fbdi_row:
                 # get defualt values from segments
+                print(f"fill_all: {fill_all}")
                 if fill_all==True:
                     value=XX_Segment.objects.filter(segment_type=i,is_active=True).first()
                     if value:

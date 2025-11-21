@@ -18,3 +18,4 @@ def main():
 
 if __name__ == '__main__':
     main()
+#celery -A config worker --loglevel=info --pool=solo

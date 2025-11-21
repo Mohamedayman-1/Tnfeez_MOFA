@@ -853,5 +853,9 @@ class OracleBalanceReportManager:
             traceback.print_exc()
             return result
 
+    @staticmethod
+    def get_segments_fund(segments) -> str:
+        """Return the Oracle report path for segment funds"""
+        return "/Custom/MOFA/Reports/SEGMENT_FUNDS_REPORT"
 
             

@@ -792,7 +792,7 @@ class TransactionTransferListView(APIView):
             control_budget_name = getattr(transaction_object, 'control_budget_name', 'MIC_HQ_MONTHLY')
             period_name = getattr(transaction_object, 'period_name', 'Sep-25')
             
-            result = balance_manager.get_balance_report_data(
+            result = balance_manager.get_segments_fund(
                 control_budget_name=control_budget_name,
                 period_name=period_name,
                 segment_filters=segment_filters  # Dynamic segments instead of segment1/2/3
@@ -980,7 +980,7 @@ class TransactionTransferDetailView(APIView):
             serializer = TransactionTransferDynamicSerializer(transfer)
             return Response(serializer.data)
         except xx_TransactionTransfer.DoesNotExist:
-            return Response(status=status.HTTP_404_NOT_FOUND)
+            return Response(status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
 class TransactionTransferUpdateView(APIView):

@@ -168,18 +168,12 @@ class get_segment_fund(APIView):
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
-        Segment55 = request.query_params.get("Segment5", None)
-        Segment99 = request.query_params.get("Segment9", None)
-        Segment111 = request.query_params.get("Segment11", None)
-
-        # Build filter dynamically - only add filters for provided parameters
+        # Build filter dynamically for all 30 segments
         filters = {}
-        if Segment55:
-            filters['Segment5'] = Segment55
-        if Segment99:
-            filters['Segment9'] = Segment99
-        if Segment111:
-            filters['Segment11'] = Segment111
+        for i in range(1, 31):
+            segment_param = request.query_params.get(f"Segment{i}", None)
+            if segment_param:
+                filters[f'Segment{i}'] = segment_param
         
         # Get total count first for debugging
         total_records = XX_Segment_Funds.objects.count()
@@ -190,23 +184,29 @@ class get_segment_fund(APIView):
         # Build response data
         results = []
         for fund in segment_funds:
-            results.append({
+            # Create result dict with all 30 segments
+            result_data = {
                 "id": fund.id,
-                "segment5": fund.Segment5,
-                "segment9": fund.Segment9,
-                "segment11": fund.Segment11,
-                "control_budget_name": fund.CONTROL_BUDGET_NAME,
-                "period_name": fund.PERIOD_NAME,
-                "budget": float(fund.BUDGET_PTD) if fund.BUDGET_PTD else 0,
-                "encumbrance": float(fund.ENCUMBRANCE_PTD) if fund.ENCUMBRANCE_PTD else 0,
-                "funds_available": float(fund.FUNDS_AVAILABLE_PTD) if fund.FUNDS_AVAILABLE_PTD else 0,
-                "commitment": float(fund.COMMITMENT_PTD) if fund.COMMITMENT_PTD else 0,
-                "obligation": float(fund.OBLIGATION_PTD) if fund.OBLIGATION_PTD else 0,
-                "actual": float(fund.ACTUAL_PTD) if fund.ACTUAL_PTD else 0,
-                "other": float(fund.OTHER_PTD) if fund.OTHER_PTD else 0,
-                "created_at": fund.created_at
-            })
-        
+                "Control_budget_name": fund.CONTROL_BUDGET_NAME,
+                "Period_name": fund.PERIOD_NAME,
+                "Budget": float(fund.BUDGET_PTD) if fund.BUDGET_PTD else 0,
+                "Encumbrance": float(fund.ENCUMBRANCE_PTD) if fund.ENCUMBRANCE_PTD else 0,
+                "Funds_available": float(fund.FUNDS_AVAILABLE_PTD) if fund.FUNDS_AVAILABLE_PTD else 0,
+                "Commitment": float(fund.COMMITMENT_PTD) if fund.COMMITMENT_PTD else 0,
+                "Obligation": float(fund.OBLIGATION_PTD) if fund.OBLIGATION_PTD else 0,
+                "Actual": float(fund.ACTUAL_PTD) if fund.ACTUAL_PTD else 0,
+                "Other": float(fund.OTHER_PTD) if fund.OTHER_PTD else 0,
+                "Created_at": fund.created_at
+            }
+            
+            # Add only segments that were filtered
+            for key in filters.keys():
+                # key is like 'Segment5', 'Segment9', etc.
+                segment_value = getattr(fund, key, None)
+                if segment_value is not None:
+                    result_data[key.lower()] = segment_value
+            
+            results.append(result_data)
         return Response(
             {
                 "message": f"Retrieved {len(results)} segment funds",
