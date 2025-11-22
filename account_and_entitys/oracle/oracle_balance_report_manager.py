@@ -9,6 +9,7 @@ Phase 5: Oracle Fusion Integration Update
 
 import base64
 import io
+from dotenv import load_dotenv
 import numpy as np
 import pandas as pd
 import requests
@@ -34,12 +35,13 @@ class OracleBalanceReportManager:
     - Excel parsing with automatic column detection
     - Segment validation
     """
+    load_dotenv()
     
     # Oracle connection settings (should be moved to settings.py or .env)
     # Note: Use xmlpserver endpoint for BI Publisher SOAP reports, not fscmRestApi
     ORACLE_URL = os.getenv("ORACLE_XMLP_URL", "https://iabakf-test.fa.ocs.oraclecloud.com/xmlpserver/services/ExternalReportWSSService")
-    ORACLE_USERNAME = os.getenv("FUSION_USER", "AFarghaly")
-    ORACLE_PASSWORD = os.getenv("FUSION_PASS", "Mubadala345")
+    ORACLE_USERNAME = os.getenv("FUSION_USER",)
+    ORACLE_PASSWORD = os.getenv("FUSION_PASS",)
     REPORT_PATH = "Custom/API/get_Ava_Fund_report.xdo"
     Get_value_from_segment="Custom/API/Get Segments/Get_value_from_segment_report.xdo"
     get_segment_fund="Custom/API/Get Segments funds/Balancess_Report.xdo"
@@ -739,6 +741,9 @@ class OracleBalanceReportManager:
             print(f"   Budget: {control_budget_name}, Period: {period_name}")
             if custom_parameters:
                 print(f"   Custom Parameters: {custom_parameters}")
+
+            print(f"   🔑 ORACLE_USERNAME: {OracleBalanceReportManager.ORACLE_USERNAME}")
+            print(f"   🔑 ORACLE_PASSWORD: {'*' * len(OracleBalanceReportManager.ORACLE_PASSWORD) if OracleBalanceReportManager.ORACLE_PASSWORD else 'None'}")
             
             # Call Oracle SOAP service
             response = requests.post(

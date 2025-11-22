@@ -335,6 +335,7 @@ class OracleSegmentMapper:
                         fbdi_row[segment_field] = seg.code if seg else None
                     else:
                         fbdi_row[segment_field] = None
+                    pass
                 else:
                     fbdi_row[segment_field] = None
         
