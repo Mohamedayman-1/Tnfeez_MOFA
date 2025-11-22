@@ -726,13 +726,7 @@ class TransactionTransferListView(APIView):
                 },
                 status=rest_framework.status.HTTP_404_NOT_FOUND,
             )
-            return Response(
-                {
-                    "error": "transaction not found",
-                    "message": f"No transaction found with ID: {transaction_id}",
-                },
-                status=rest_framework.status.HTTP_404_NOT_FOUND,
-            )
+          
         status = False
         if transaction_object.code[0:3] != "FAD":
 
@@ -772,46 +766,50 @@ class TransactionTransferListView(APIView):
 
         for transfer in transfers:
             # Build dynamic segment filters from transfer's XX_TransactionSegment records
-            # Get all segments for this transfer (FROM side for balance checking)
+            # Get all segments for this transfer (check both FROM and TO sides)
             transaction_segments = transfer.transaction_segments.select_related(
-                'segment_type', 'from_segment_value'
+                'segment_type', 'from_segment_value', 'to_segment_value'
             )
+            print(f"Transfer {transfer.transfer_id}: Found {len(transaction_segments)} segments")
             
             # Build segment_filters dict: {segment_type_id: segment_code}
             segment_filters = {}
             for trans_seg in transaction_segments:
                 segment_type_id = trans_seg.segment_type_id
-                # Use from_segment_value for balance checking (source of funds)
-                segment_code = trans_seg.from_segment_value.code if trans_seg.from_segment_value else None
+                # Try from_segment_value first, then to_segment_value (for receiving transfers)
+                segment_code = None
+                if trans_seg.from_segment_value:
+                    segment_code = trans_seg.from_segment_value.code
+                elif trans_seg.to_segment_value:
+                    segment_code = trans_seg.to_segment_value.code
+                
                 if segment_code:
                     segment_filters[segment_type_id] = segment_code
+                    print(f"  Segment type {segment_type_id}: {segment_code}")
             
-            # Get balance data with dynamic segments
-            # Note: You'll need to pass control_budget_name and period_name from transaction context
-            # For now, using defaults - adjust based on your business logic
-            control_budget_name = getattr(transaction_object, 'control_budget_name', 'MIC_HQ_MONTHLY')
-            period_name = getattr(transaction_object, 'period_name', 'Sep-25')
-            
+            # Get balance data from XX_Segment_Funds database with dynamic segments
             result = balance_manager.get_segments_fund(
-                control_budget_name=control_budget_name,
-                period_name=period_name,
-                segment_filters=segment_filters  # Dynamic segments instead of segment1/2/3
+                segment_filters=segment_filters
             )
             
             data = result.get("data", [])
+            
+            # Store all control budget records for this transfer
+            transfer.control_budget_records = data  # Attach to transfer object temporarily
 
+            # Update transfer with first record (primary control budget) for backward compatibility
             if data and len(data) > 0:
-                record = data[0]
-                transfer.available_budget = record.get("funds_available_asof", 0.0)
-                transfer.approved_budget = record.get("budget_ytd", 0.0)
-                transfer.encumbrance = record.get("encumbrance_ytd", 0.0)
-                transfer.actual = record.get("actual_ytd", 0.0)
-                transfer.budget_adjustments = record.get("budget_adjustments", 0.0)
-                transfer.commitments = record.get("commitments", 0.0)
-                transfer.expenditures = record.get("expenditures", 0.0)
-                transfer.initial_budget = record.get("initial_budget", 0.0)
-                transfer.obligations = record.get("obligations", 0.0)
-                transfer.other_consumption = record.get("other_consumption", 0.0)
+                record = data[0]  # Use first record as primary
+                transfer.available_budget = record.get("Funds_available", 0.0)
+                transfer.approved_budget = record.get("Budget", 0.0)
+                transfer.encumbrance = record.get("Encumbrance", 0.0)
+                transfer.actual = record.get("Actual", 0.0)
+                transfer.budget_adjustments = record.get("Budget_adjustments", 0.0)
+                transfer.commitments = record.get("Commitments", 0.0)
+                transfer.expenditures = record.get("Expenditures", 0.0)
+                transfer.initial_budget = record.get("Initial_budget", 0.0)
+                transfer.obligations = record.get("Obligation", 0.0)
+                transfer.other_consumption = record.get("Other", 0.0)
             else:
                 # No data found, set default values
                 transfer.available_budget = 0.0
@@ -885,21 +883,29 @@ class TransactionTransferListView(APIView):
                 "transfer_id": transfer_id,
                 "segments": segments_for_validation,
             }
-
+   ############ validation section commented out ############
             # Validate the transfer with dynamic segments
-            validation_errors = validate_transaction_dynamic(
-                validation_data, code=transaction_object.code
-            )
-            validation_errors = validate_transaction_transfer_dynamic(
-                validation_data, code=transaction_object.code, errors=validation_errors
-            )
+            #validation_errors = validate_transaction_dynamic(
+            #    validation_data, code=transaction_object.code
+            #)
+            #validation_errors = validate_transaction_transfer_dynamic(
+            #    validation_data, code=transaction_object.code, errors=validation_errors
+            #)
 
             # Add validation results to transfer data
             transfer_response = transfer_data.copy()
-            transfer_response["validation_errors"] = validation_errors
-            transfer_response["is_valid"] = len(validation_errors) == 0
+            #transfer_response["validation_errors"] = validation_errors
+            #transfer_response["is_valid"] = len(validation_errors) == 0
+            
+            # Add all control budget records to response
+            control_budget_records = getattr(transfer_obj, 'control_budget_records', [])
+            transfer_response["control_budgets"] = control_budget_records
+            transfer_response["control_budgets_count"] = len(control_budget_records)
 
             response_data.append(transfer_response)
+
+
+            ########### validation section commented out ############
 
         # Also add transaction-wide validation summary
 

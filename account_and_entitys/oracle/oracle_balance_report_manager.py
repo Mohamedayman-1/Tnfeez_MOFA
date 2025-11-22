@@ -854,8 +854,79 @@ class OracleBalanceReportManager:
             return result
 
     @staticmethod
-    def get_segments_fund(segments) -> str:
-        """Return the Oracle report path for segment funds"""
-        return "/Custom/MOFA/Reports/SEGMENT_FUNDS_REPORT"
-
+    def get_segments_fund(segment_filters: Optional[Dict[int, str]] = None) -> Dict[str, Any]:
+        """
+        Query XX_Segment_Funds database with dynamic segment filtering.
+        
+        Args:
+            segment_filters: Dict of {segment_type_id: segment_code} for filtering
+                           Example: {1: 'E001', 2: 'A100'} filters Segment1='E001' and Segment2='A100'
+        
+        Returns:
+            dict: {
+                'success': bool,
+                'data': list of fund records with financial data,
+                'message': str,
+                'total_records': int,
+                'filters_applied': dict
+            }
+        """
+        result = {
+            'success': False,
+            'data': [],
+            'message': '',
+            'total_records': 0,
+            'filters_applied': segment_filters or {}
+        }
+        
+        try:
+            # Build filter dynamically based on segment_filters
+            filters = {}
+            if segment_filters:
+                for seg_type_id, seg_code in segment_filters.items():
+                    # Map segment_type_id to Segment field (Segment1, Segment2, etc.)
+                    filters[f'Segment{seg_type_id}'] = seg_code
             
+            # Query XX_Segment_Funds database
+            segment_funds = XX_Segment_Funds.objects.filter(**filters) 
+            print(f"✅ Retrieved {segment_funds.count()} records from XX_Segment_Funds with filters: {filters}")
+            
+            # Build response data
+            data = []
+            for fund in segment_funds:
+                fund_data = {
+                    "id": fund.id,
+                    "Control_budget_name": fund.CONTROL_BUDGET_NAME,
+                    "Period_name": fund.PERIOD_NAME,
+                    "Budget": float(fund.BUDGET_PTD) if fund.BUDGET_PTD else 0.0,
+                    "Encumbrance": float(fund.ENCUMBRANCE_PTD) if fund.ENCUMBRANCE_PTD else 0.0,
+                    "Funds_available": float(fund.FUNDS_AVAILABLE_PTD) if fund.FUNDS_AVAILABLE_PTD else 0.0,
+                    "Commitments": float(fund.COMMITMENT_PTD) if fund.COMMITMENT_PTD else 0.0,
+                    "Obligation": float(fund.OBLIGATION_PTD) if fund.OBLIGATION_PTD else 0.0,
+                    "Actual": float(fund.ACTUAL_PTD) if fund.ACTUAL_PTD else 0.0,
+                    "Other": float(fund.OTHER_PTD) if fund.OTHER_PTD else 0.0,
+                    "Created_at": fund.created_at.isoformat() if fund.created_at else None
+                }
+                
+                # Add segment values if filters were applied
+                if filters:
+                    for key in filters.keys():
+                        segment_value = getattr(fund, key, None)
+                        if segment_value is not None:
+                            fund_data[key.lower()] = segment_value
+                
+                data.append(fund_data)
+            
+            result['success'] = True
+            result['data'] = data
+            result['total_records'] = len(data)
+            result['message'] = f"Retrieved {len(data)} segment fund records"
+            
+            return result
+            
+        except Exception as e:
+            result['message'] = f"Error querying segment funds: {str(e)}"
+            print(f"❌ {result['message']}")
+            import traceback
+            traceback.print_exc()
+            return result

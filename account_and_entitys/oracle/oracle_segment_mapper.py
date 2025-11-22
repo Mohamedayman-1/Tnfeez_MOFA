@@ -306,6 +306,10 @@ class OracleSegmentMapper:
         # Build segment values based on include_from_to
         for ts in transaction_segments:
             oracle_field = OracleSegmentMapper.get_oracle_field_name(ts.segment_type)
+            print("segment type")
+            print(ts.segment_type.segment_name,include_from_to)
+            print(ts.segment_type)
+
             
             if include_from_to == 'from' and ts.from_segment_value:
                 fbdi_row[oracle_field] = ts.from_segment_value.code
@@ -322,12 +326,13 @@ class OracleSegmentMapper:
         for i in range(1, 31):
             segment_field = f'Segment{i}'
             if segment_field not in fbdi_row:
-                # get defualt values from segments
+                # get default values from segments
                 print(f"fill_all: {fill_all}")
-                if fill_all==True:
-                    value=XX_Segment.objects.filter(segment_type=i,is_active=True).first()
-                    if value:
-                        fbdi_row[segment_field] = value.code
+                if fill_all == True:
+                    seg_type = XX_SegmentType.objects.filter(oracle_segment_number=i, is_active=True).first()
+                    if seg_type:
+                        seg = XX_Segment.objects.filter(segment_type=seg_type.segment_id, is_active=True).first()
+                        fbdi_row[segment_field] = seg.code if seg else None
                     else:
                         fbdi_row[segment_field] = None
                 else:
