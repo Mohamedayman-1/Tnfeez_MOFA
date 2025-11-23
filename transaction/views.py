@@ -886,12 +886,12 @@ class TransactionTransferListView(APIView):
 
               ############ validation section commented out ############
             # Validate the transfer with dynamic segments
-            validation_errors = validate_transaction_dynamic(
-                validation_data, code=transaction_object.code
-            )
-            validation_errors = validate_transaction_transfer_dynamic(
-                validation_data, code=transaction_object.code, errors=validation_errors
-            )
+            #validation_errors = validate_transaction_dynamic(
+            #    validation_data, code=transaction_object.code
+            #)
+            #validation_errors = validate_transaction_transfer_dynamic(
+            #    validation_data, code=transaction_object.code, errors=validation_errors
+            #)
 
             # Add validation results to transfer data
             transfer_response = transfer_data.copy()
