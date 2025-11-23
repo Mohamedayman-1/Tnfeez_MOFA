@@ -10,6 +10,7 @@ from account_and_entitys.models import (
     XX_Project,
     XX_PivotFund,
     XX_ACCOUNT_ENTITY_LIMIT,
+    XX_Segment_Funds,
 )
 from budget_management.models import xx_BudgetTransfer
 from .serializers import (
@@ -110,9 +111,9 @@ def validate_transaction_dynamic(data, code=None):
         errors.append("Can't have value in both from and to at the same time")
 
     # Validation 4: Check if available_budget > from_center
-    if code and code[0:3] != "AFR":
-        if Decimal(str(data["from_center"])) > Decimal(str(data["available_budget"])):
-            errors.append("from value must be less or equal available_budget value")
+    # if code and code[0:3] != "AFR":
+    #     if Decimal(str(data["from_center"])) > Decimal(str(data["available_budget"])):
+    #         errors.append("from value must be less or equal available_budget value")
 
     # Validation 5: Validate dynamic segments structure
     segments_data = data.get("segments", {})
@@ -702,6 +703,29 @@ class TransactionTransferListView(APIView):
 
     permission_classes = [IsAuthenticated]
 
+    def _get_mofa_cost2_available(self, segments_for_validation):
+        """
+        Get available funds for the MOFA_COST_2 control budget that match the provided segments.
+        """
+        filters = {"CONTROL_BUDGET_NAME": "MOFA_COST_2"}
+
+        for seg_id, seg_info in segments_for_validation.items():
+            # Try to get the segment code from any available field
+            seg_code = seg_info.get("code") or seg_info.get("from_code") or seg_info.get("to_code")
+            if seg_code:
+                filters[f"Segment{seg_id}"] = seg_code
+
+        print(f"🔍 MOFA_COST_2 Query filters: {filters}")
+        fund = XX_Segment_Funds.objects.filter(**filters).first()
+        if not fund:
+            print(f"⚠️  No MOFA_COST_2 fund found for filters: {filters}")
+            return None
+
+        value = getattr(fund, "FUNDS_AVAILABLE_PTD", None)
+        available = float(value) if value not in [None, ""] else 0.0
+        print(f"✅ MOFA_COST_2 available funds: {available}")
+        return available
+
     def get(self, request):
         transaction_id = request.query_params.get("transaction")
         print(f"Transaction ID: {transaction_id}")
@@ -765,34 +789,48 @@ class TransactionTransferListView(APIView):
         segment_mapper = OracleSegmentMapper()
 
         for transfer in transfers:
+            # Determine transfer direction FIRST
+            from_center_val = float(transfer.from_center) if transfer.from_center not in [None, ""] else 0.0
+            to_center_val = float(transfer.to_center) if transfer.to_center not in [None, ""] else 0.0
+            is_source_transfer = from_center_val > 0  # True = taking funds (FROM), False = receiving funds (TO)
+            
             # Build dynamic segment filters from transfer's XX_TransactionSegment records
             # Get all segments for this transfer (check both FROM and TO sides)
             transaction_segments = transfer.transaction_segments.select_related(
                 'segment_type', 'from_segment_value', 'to_segment_value'
             )
-            print(f"Transfer {transfer.transfer_id}: Found {len(transaction_segments)} segments")
+            print(f"\n🔍 Transfer {transfer.transfer_id}: Found {transaction_segments.count()} segments")
+            print(f"   Direction: {'SOURCE (taking funds)' if is_source_transfer else 'DESTINATION (receiving funds)'}")
+            print(f"   from_center={from_center_val}, to_center={to_center_val}")
             
             # Build segment_filters dict: {segment_type_id: segment_code}
+            # Use FROM segments if taking funds, TO segments if receiving funds
             segment_filters = {}
             for trans_seg in transaction_segments:
                 segment_type_id = trans_seg.segment_type_id
-                # Try from_segment_value first, then to_segment_value (for receiving transfers)
-                segment_code = None
-                if trans_seg.from_segment_value:
-                    segment_code = trans_seg.from_segment_value.code
-                elif trans_seg.to_segment_value:
-                    segment_code = trans_seg.to_segment_value.code
+                
+                # Select the correct segment value based on transfer direction
+                if is_source_transfer:
+                    # Taking funds - use FROM segment
+                    segment_code = trans_seg.from_segment_value.code if trans_seg.from_segment_value else None
+                else:
+                    # Receiving funds - use TO segment
+                    segment_code = trans_seg.to_segment_value.code if trans_seg.to_segment_value else None
                 
                 if segment_code:
                     segment_filters[segment_type_id] = segment_code
-                    print(f"  Segment type {segment_type_id}: {segment_code}")
+                    print(f"   ✓ Segment type {segment_type_id} ({trans_seg.segment_type.segment_name}): {segment_code}")
+                else:
+                    print(f"   ⚠️  Segment type {segment_type_id} ({trans_seg.segment_type.segment_name}): No code found")
             
             # Get balance data from XX_Segment_Funds database with dynamic segments
+            print(f"   📊 Querying balance with filters: {segment_filters}")
             result = balance_manager.get_segments_fund(
                 segment_filters=segment_filters
             )
             
             data = result.get("data", [])
+            print(f"   📈 Found {len(data)} control budget records")
             
             # Store all control budget records for this transfer
             transfer.control_budget_records = data  # Attach to transfer object temporarily
@@ -859,12 +897,19 @@ class TransactionTransferListView(APIView):
                         'from_code': from_code,
                         'to_code': to_code
                     }
-                # If NEW SIMPLIFIED format (only one code), use 'code' field
+                # If NEW SIMPLIFIED format or single direction populated
                 elif from_code or to_code:
-                    # Single code - store in simplified format
-                    segments_for_validation[seg_id] = {
-                        'code': from_code if from_code else to_code
-                    }
+                    # Use the code that corresponds to the transfer direction
+                    active_code = from_code if is_source else to_code
+                    if active_code:
+                        segments_for_validation[seg_id] = {
+                            'code': active_code
+                        }
+                    else:
+                        # Fallback: use whichever code exists
+                        segments_for_validation[seg_id] = {
+                            'code': from_code if from_code else to_code
+                        }
                 else:
                     # No codes at all (shouldn't happen but handle gracefully)
                     segments_for_validation[seg_id] = {
@@ -883,20 +928,33 @@ class TransactionTransferListView(APIView):
                 "transfer_id": transfer_id,
                 "segments": segments_for_validation,
             }
+            # Initialize validation errors list
+            validation_errors = []
 
-              ############ validation section commented out ############
-            # Validate the transfer with dynamic segments
-            #validation_errors = validate_transaction_dynamic(
-            #    validation_data, code=transaction_object.code
-            #)
-            #validation_errors = validate_transaction_transfer_dynamic(
-            #    validation_data, code=transaction_object.code, errors=validation_errors
-            #)
+            # Validate the transfer with dynamic segments (UNCOMMENTED for proper validation)
+            validation_errors = validate_transaction_dynamic(
+                validation_data, code=transaction_object.code
+            )
+            validation_errors = validate_transaction_transfer_dynamic(
+                validation_data, code=transaction_object.code, errors=validation_errors
+            )
+
+            # Additional MOFA_COST_2 validation for source transfers
+            if from_center > 0:
+                mofa_available = self._get_mofa_cost2_available(segments_for_validation)
+                if mofa_available is None:
+                    validation_errors.append(
+                        "MOFA_COST_2 budget record not found for the provided segments"
+                    )
+                elif from_center > (mofa_available/2):
+                    validation_errors.append(
+                        f"from amount {from_center} exceeds MOFA_COST_2 available funds {mofa_available/2}"
+                    )
 
             # Add validation results to transfer data
             transfer_response = transfer_data.copy()
-            #transfer_response["validation_errors"] = validation_errors
-            #transfer_response["is_valid"] = len(validation_errors) == 0
+            transfer_response["validation_errors"] = validation_errors
+            transfer_response["is_valid"] = len(validation_errors) == 0
             
             # Add all control budget records to response
             control_budget_records = getattr(transfer_obj, 'control_budget_records', [])
@@ -904,9 +962,6 @@ class TransactionTransferListView(APIView):
             transfer_response["control_budgets_count"] = len(control_budget_records)
 
             response_data.append(transfer_response)
-
-
-            ########### validation section commented out ############
 
         # Also add transaction-wide validation summary
 

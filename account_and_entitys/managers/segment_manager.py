@@ -108,35 +108,54 @@ class SegmentManager:
         # Validate all required segments are present
         for seg_type in required_types:
             if is_id_format:
-                # Format: {segment_id: {'from_code': 'xxx', 'to_code': 'yyy'}}
+                # Format: {segment_id: {'from_code': 'xxx', 'to_code': 'yyy'}} OR {segment_id: {'code': 'xxx'}}
                 if seg_type.segment_id not in segments_data:
                     errors.append(f"Required segment '{seg_type.segment_name}' (ID {seg_type.segment_id}) is missing")
                     continue
                 
                 seg_data = segments_data[seg_type.segment_id]
-                from_code = seg_data.get('from_code') or seg_data.get('from')
-                to_code = seg_data.get('to_code') or seg_data.get('to')
                 
-                if not from_code:
-                    errors.append(f"Required segment '{seg_type.segment_name}' from_code cannot be empty")
-                if not to_code:
-                    errors.append(f"Required segment '{seg_type.segment_name}' to_code cannot be empty")
-                
-                # Verify from_code exists
-                if from_code and not XX_Segment.objects.filter(
-                    segment_type=seg_type,
-                    code=from_code,
-                    is_active=True
-                ).exists():
-                    errors.append(f"Invalid from_code '{from_code}' for {seg_type.segment_name}")
-                
-                # Verify to_code exists
-                if to_code and not XX_Segment.objects.filter(
-                    segment_type=seg_type,
-                    code=to_code,
-                    is_active=True
-                ).exists():
-                    errors.append(f"Invalid to_code '{to_code}' for {seg_type.segment_name}")
+                # Check if using NEW SIMPLIFIED FORMAT (single 'code' field)
+                if 'code' in seg_data:
+                    # NEW FORMAT: Only 'code' field
+                    code = seg_data.get('code')
+                    if not code:
+                        errors.append(f"Required segment '{seg_type.segment_name}' code cannot be empty")
+                    else:
+                        # Verify code exists
+                        if not XX_Segment.objects.filter(
+                            segment_type=seg_type,
+                            code=code,
+                            is_active=True
+                        ).exists():
+                            errors.append(f"Invalid code '{code}' for {seg_type.segment_name}")
+                else:
+                    # OLD FORMAT: from_code and to_code fields
+                    from_code = seg_data.get('from_code') or seg_data.get('from')
+                    to_code = seg_data.get('to_code') or seg_data.get('to')
+                    
+                    if not from_code:
+                        errors.append(f"Required segment '{seg_type.segment_name}' from_code cannot be empty")
+                    if not to_code:
+                        errors.append(f"Required segment '{seg_type.segment_name}' to_code cannot be empty")
+                    if not to_code:
+                        errors.append(f"Required segment '{seg_type.segment_name}' to_code cannot be empty")
+                    
+                    # Verify from_code exists
+                    if from_code and not XX_Segment.objects.filter(
+                        segment_type=seg_type,
+                        code=from_code,
+                        is_active=True
+                    ).exists():
+                        errors.append(f"Invalid from_code '{from_code}' for {seg_type.segment_name}")
+                    
+                    # Verify to_code exists
+                    if to_code and not XX_Segment.objects.filter(
+                        segment_type=seg_type,
+                        code=to_code,
+                        is_active=True
+                    ).exists():
+                        errors.append(f"Invalid to_code '{to_code}' for {seg_type.segment_name}")
             else:
                 # Format: {segment_name: code} (backward compatibility)
                 if seg_type.segment_name not in segments_data:
