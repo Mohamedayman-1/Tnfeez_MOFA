@@ -50,7 +50,15 @@ from django.db.models import CharField
 from django.db.models.functions import Cast
 from django.db.models import Q
 from account_and_entitys.oracle.oracle_balance_report_manager import OracleBalanceReportManager
+from budget_management.views import TransferPagination
 
+
+class segments_fundspaginations(PageNumberPagination):
+    """Pagination class for budget transfers"""
+
+    page_size = 10
+    page_size_query_param = "page_size"
+    max_page_size = 100
 
 
 
@@ -163,6 +171,7 @@ class Download_segment_Funds(APIView):
     
 
 class get_segment_fund(APIView):
+
     """API to get segment funds with budget, encumbrance, and financial values"""
 
     permission_classes = [IsAuthenticated]
@@ -170,6 +179,8 @@ class get_segment_fund(APIView):
     def get(self, request):
         # Build filter dynamically for all 30 segments
         filters = {}
+
+
         for i in range(1, 31):
             segment_param = request.query_params.get(f"Segment{i}", None)
             if segment_param:
@@ -214,6 +225,83 @@ class get_segment_fund(APIView):
                 "total_records_in_db": total_records,
                 "filters_applied": filters,
                 "data": results
+            },
+            status=status.HTTP_200_OK
+        )
+    
+
+
+
+
+class get_segments_fund(APIView):
+    """API to get segment funds with budget, encumbrance, and financial values"""
+
+    permission_classes = [IsAuthenticated]
+    pagination_class = segments_fundspaginations
+
+    def get(self, request):
+        # Build filter dynamically for all 30 segments
+        filters = {}
+
+        control_budget_name = request.query_params.get("control_budget_name", None)
+        period_name = request.query_params.get("period_name", None)
+        if control_budget_name:
+            filters['CONTROL_BUDGET_NAME'] = control_budget_name
+        if period_name:
+            filters['PERIOD_NAME'] = period_name
+
+        for i in range(1, 31):
+            segment_param = request.query_params.get(f"Segment{i}", None)
+            if segment_param:
+                filters[f'Segment{i}'] = segment_param
+        
+        #total_records = XX_Segment_Funds.objects.count()
+        segment_funds = XX_Segment_Funds.objects.filter(**filters)
+        total_records=segment_funds.count()
+
+        paginator = self.pagination_class()
+        page_qs = paginator.paginate_queryset(segment_funds, request, view=self)
+
+        results = []
+        for fund in page_qs:
+            result_data = {
+                "id": fund.id,
+                "Control_budget_name": fund.CONTROL_BUDGET_NAME,
+                "Period_name": fund.PERIOD_NAME,
+                "Budget": float(fund.BUDGET_PTD) if fund.BUDGET_PTD else 0,
+                "Encumbrance": float(fund.ENCUMBRANCE_PTD) if fund.ENCUMBRANCE_PTD else 0,
+                "Funds_available": float(fund.FUNDS_AVAILABLE_PTD) if fund.FUNDS_AVAILABLE_PTD else 0,
+                "Commitment": float(fund.COMMITMENT_PTD) if fund.COMMITMENT_PTD else 0,
+                "Obligation": float(fund.OBLIGATION_PTD) if fund.OBLIGATION_PTD else 0,
+                "Actual": float(fund.ACTUAL_PTD) if fund.ACTUAL_PTD else 0,
+                "Other": float(fund.OTHER_PTD) if fund.OTHER_PTD else 0,
+                "Created_at": fund.created_at
+            }
+
+            # Return only non-null segment columns Segment1..Segment30
+            for i in range(1, 31):
+                segment_value = getattr(fund, f"Segment{i}", None)
+                if segment_value is not None:
+                    result_data[f"segment{i}"] = segment_value
+
+            for key in filters.keys():
+                segment_value = getattr(fund, key, None)
+                if segment_value is not None:
+                    result_data[key.lower()] = segment_value
+
+            results.append(result_data)
+
+        return Response(
+            {
+                "message": f"Retrieved {paginator.page.paginator.count} segment funds",
+                "count": paginator.page.paginator.count,
+                "total_records_in_db": total_records,
+                "filters_applied": filters,
+                "next": paginator.get_next_link(),
+                "previous": paginator.get_previous_link(),
+                "page": paginator.page.number,
+                "page_size": paginator.get_page_size(request),
+                "data": results,
             },
             status=status.HTTP_200_OK
         )
