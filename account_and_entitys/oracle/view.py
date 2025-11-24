@@ -207,6 +207,9 @@ class get_segment_fund(APIView):
                 "Obligation": float(fund.OBLIGATION_PTD) if fund.OBLIGATION_PTD else 0,
                 "Actual": float(fund.ACTUAL_PTD) if fund.ACTUAL_PTD else 0,
                 "Other": float(fund.OTHER_PTD) if fund.OTHER_PTD else 0,
+                "Total_budget": float(fund.TOTAL_BUDGET) if fund.TOTAL_BUDGET else 0,
+                "Initial_budget": float(fund.INITIAL_BUDGET) if fund.INITIAL_BUDGET else 0,
+                "Budget_adjustments": float(fund.BUDGET_ADJUSTMENTS) if fund.BUDGET_ADJUSTMENTS else 0,
                 "Created_at": fund.created_at
             }
             
@@ -240,24 +243,57 @@ class get_segments_fund(APIView):
     pagination_class = segments_fundspaginations
 
     def get(self, request):
-        # Build filter dynamically for all 30 segments
         filters = {}
 
-        control_budget_name = request.query_params.get("control_budget_name", None)
-        period_name = request.query_params.get("period_name", None)
-        if control_budget_name:
-            filters['CONTROL_BUDGET_NAME'] = control_budget_name
-        if period_name:
-            filters['PERIOD_NAME'] = period_name
+        control_budget_name = request.query_params.get("control_budget_name")
+        period_name = request.query_params.get("period_name")
+        Budget = request.query_params.get("Budget")
+        Encumbrance = request.query_params.get("Encumbrance")
+        Funds_available = request.query_params.get("Funds_available")
+        Commitment = request.query_params.get("Commitment")
+        Obligation = request.query_params.get("Obligation")
+        Actual = request.query_params.get("Actual")
+        Other = request.query_params.get("Other")
+        total_budget = request.query_params.get("total_budget")
+        initial_budget = request.query_params.get("initial_budget")
+        budget_adjustments = request.query_params.get("budget_adjustments")
 
+        # numeric fields – still exact match (you can later add range logic if needed)
+        if Budget is not None:
+            filters['BUDGET_PTD'] = Budget
+        if Encumbrance is not None:
+            filters['ENCUMBRANCE_PTD'] = Encumbrance
+        if Funds_available is not None:
+            filters['FUNDS_AVAILABLE_PTD'] = Funds_available
+        if Commitment is not None:
+            filters['COMMITMENT_PTD'] = Commitment
+        if Obligation is not None:
+            filters['OBLIGATION_PTD'] = Obligation
+        if Actual is not None:
+            filters['ACTUAL_PTD'] = Actual
+        if Other is not None:
+            filters['OTHER_PTD'] = Other
+        if total_budget is not None:
+            filters['TOTAL_BUDGET'] = total_budget
+        if initial_budget is not None:
+            filters['INITIAL_BUDGET'] = initial_budget
+        if budget_adjustments is not None:
+            filters['BUDGET_ADJUSTMENTS'] = budget_adjustments
+
+        # string fields – partial match
+        if control_budget_name:
+            filters['CONTROL_BUDGET_NAME__icontains'] = control_budget_name
+        if period_name:
+            filters['PERIOD_NAME__icontains'] = period_name
+
+        # Segments 1..30 – partial match
         for i in range(1, 31):
-            segment_param = request.query_params.get(f"Segment{i}", None)
+            segment_param = request.query_params.get(f"segment{i}")
             if segment_param:
-                filters[f'Segment{i}'] = segment_param
-        
-        #total_records = XX_Segment_Funds.objects.count()
+                filters[f'Segment{i}__istartswith'] = segment_param
+
         segment_funds = XX_Segment_Funds.objects.filter(**filters)
-        total_records=segment_funds.count()
+        total_records = segment_funds.count()
 
         paginator = self.pagination_class()
         page_qs = paginator.paginate_queryset(segment_funds, request, view=self)
@@ -275,19 +311,25 @@ class get_segments_fund(APIView):
                 "Obligation": float(fund.OBLIGATION_PTD) if fund.OBLIGATION_PTD else 0,
                 "Actual": float(fund.ACTUAL_PTD) if fund.ACTUAL_PTD else 0,
                 "Other": float(fund.OTHER_PTD) if fund.OTHER_PTD else 0,
-                "Created_at": fund.created_at
+                "total_budget": float(fund.TOTAL_BUDGET) if fund.TOTAL_BUDGET else 0,
+                "initial_budget": float(fund.INITIAL_BUDGET) if fund.INITIAL_BUDGET else 0,
+                "budget_adjustments": float(fund.BUDGET_ADJUSTMENTS) if fund.BUDGET_ADJUSTMENTS else 0,
+                "Created_at": fund.created_at,
             }
 
-            # Return only non-null segment columns Segment1..Segment30
+            # return only non-null segment columns Segment1..Segment30
             for i in range(1, 31):
                 segment_value = getattr(fund, f"Segment{i}", None)
                 if segment_value is not None:
                     result_data[f"segment{i}"] = segment_value
 
+            # if you still want to echo back fields from filters
             for key in filters.keys():
-                segment_value = getattr(fund, key, None)
-                if segment_value is not None:
-                    result_data[key.lower()] = segment_value
+                # key may be "FIELD__icontains" – strip lookup part
+                field_name = key.split("__", 1)[0]
+                field_value = getattr(fund, field_name, None)
+                if field_value is not None:
+                    result_data[field_name.lower()] = field_value
 
             results.append(result_data)
 
@@ -303,5 +345,5 @@ class get_segments_fund(APIView):
                 "page_size": paginator.get_page_size(request),
                 "data": results,
             },
-            status=status.HTTP_200_OK
+            status=status.HTTP_200_OK,
         )

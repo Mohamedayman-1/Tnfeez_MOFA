@@ -107,6 +107,7 @@ class CreateBudgetTransferView(APIView):
             )
 
         transfer_type = request.data.get("type").upper()
+        transfer_control_budget = request.data.get("budget_control", "")
 
         if transfer_type in ["FAR", "AFR", "FAD"]:
             prefix = f"{transfer_type}-"
@@ -143,6 +144,7 @@ class CreateBudgetTransferView(APIView):
                 status="pending",
                 request_date=timezone.now(),
                 code=new_code,
+                control_budget=transfer_control_budget,
             )
             Notification_object = xx_notification.objects.create(
                 user_id=request.user.id,

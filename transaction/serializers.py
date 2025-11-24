@@ -45,16 +45,17 @@ class TransactionTransferDynamicSerializer(serializers.ModelSerializer):
             'available_budget',
             'from_center',
             'to_center',
-            'budget_adjustments',
             'commitments',
             'expenditures',
-            'initial_budget',
             'obligations',
             'other_consumption',
             'file',
             # Dynamic segment fields
             'segments',
-            'segment_summary'
+            'segment_summary',
+            'total_budget',
+            'initial_budget',
+            'budget_adjustments'
         ]
         read_only_fields = ('transfer_id', 'segments', 'segment_summary')
     

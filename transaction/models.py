@@ -30,6 +30,7 @@ class xx_TransactionTransfer(models.Model):
     initial_budget = models.DecimalField(max_digits=15, decimal_places=2, null=True, blank=True)
     obligations = models.DecimalField(max_digits=15, decimal_places=2, null=True, blank=True)
     other_consumption = models.DecimalField(max_digits=15, decimal_places=2, null=True, blank=True, default=0)
+    total_budget = models.DecimalField(max_digits=15, decimal_places=2, null=True, blank=True)
 
 
     file = models.FileField(upload_to="transfers/", null=True, blank=True)

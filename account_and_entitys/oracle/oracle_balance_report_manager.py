@@ -813,6 +813,9 @@ class OracleBalanceReportManager:
                     funds_available = row.get('FUNDS_AVAILABLE_PTD')
                     budget_ytd = row.get('BUDGET_PTD')
                     commitment_ptd = row.get('COMMITMENT_PTD')
+                    total_budget = row.get('TOTAL_BUDGET')
+                    initial_budget = row.get('INITIAL_BUDGET')
+                    budget_adjustments = row.get('BUDGET_ADJUSTMENTS')
                     
                     # Create database record
                     try:
@@ -828,6 +831,10 @@ class OracleBalanceReportManager:
                             ACTUAL_PTD=actual_ytd,
                             BUDGET_PTD=budget_ytd,
                             ENCUMBRANCE_PTD=encumbrance_ptd,
+                            TOTAL_BUDGET=total_budget,
+                            INITIAL_BUDGET=initial_budget,
+                            BUDGET_ADJUSTMENTS=budget_adjustments,
+
                         )
                         print(f"✅ Created fund record {idx + 1}")
                     except Exception as e:
@@ -891,6 +898,13 @@ class OracleBalanceReportManager:
                 for seg_type_id, seg_code in segment_filters.items():
                     # Map segment_type_id to Segment field (Segment1, Segment2, etc.)
                     filters[f'Segment{seg_type_id}'] = seg_code
+
+            Control_budget_name=["MOFA_CASH", "MOFA_COST_2"]
+            Period_name="1-25"
+            #filters['CONTROL_BUDGET_NAME'] = Control_budget_name
+            filters['PERIOD_NAME'] = Period_name
+           
+
             
             # Query XX_Segment_Funds database
             segment_funds = XX_Segment_Funds.objects.filter(**filters) 
@@ -910,6 +924,9 @@ class OracleBalanceReportManager:
                     "Obligation": float(fund.OBLIGATION_PTD) if fund.OBLIGATION_PTD else 0.0,
                     "Actual": float(fund.ACTUAL_PTD) if fund.ACTUAL_PTD else 0.0,
                     "Other": float(fund.OTHER_PTD) if fund.OTHER_PTD else 0.0,
+                    "Total_budget": float(fund.TOTAL_BUDGET) if fund.TOTAL_BUDGET else 0.0,
+                    "Initial_budget": float(fund.INITIAL_BUDGET) if fund.INITIAL_BUDGET else 0.0,
+                    "Budget_adjustments": float(fund.BUDGET_ADJUSTMENTS) if fund.BUDGET_ADJUSTMENTS else 0.0,
                     "Created_at": fund.created_at.isoformat() if fund.created_at else None
                 }
                 

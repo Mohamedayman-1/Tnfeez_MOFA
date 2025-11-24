@@ -1342,6 +1342,10 @@ class XX_Segment_Funds(models.Model):
     OTHER_PTD = models.DecimalField(max_digits=20, decimal_places=2, null=True, blank=True, help_text="OTHER_PTD")
     ACTUAL_PTD = models.DecimalField(max_digits=20, decimal_places=2, null=True, blank=True, help_text="ACTUAL_PTD")
     BUDGET_PTD= models.DecimalField(max_digits=20, decimal_places=2, null=True, blank=True, help_text="BUDGET_PTD")
+    TOTAL_BUDGET = models.DecimalField(max_digits=20, decimal_places=2, null=True, blank=True, help_text="TOTAL_BUDGET")
+    INITIAL_BUDGET = models.DecimalField(max_digits=20, decimal_places=2, null=True, blank=True, help_text="INITIAL_BUDGET")
+    BUDGET_ADJUSTMENTS = models.DecimalField(max_digits=20, decimal_places=2, null=True, blank=True, help_text="BUDGET_ADJUSTMENTS")
+
     
     # Metadata
     created_at = models.DateTimeField(auto_now_add=True)

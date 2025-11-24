@@ -111,10 +111,14 @@ def validate_transaction_dynamic(data, code=None):
         errors.append("Can't have value in both from and to at the same time")
 
     # Validation 4: Check if available_budget > from_center
-    # if code and code[0:3] != "AFR":
-    #     if Decimal(str(data["from_center"])) > Decimal(str(data["available_budget"])):
-    #         errors.append("from value must be less or equal available_budget value")
+    if code and code[0:3] != "AFR":
+        from_center = Decimal(str(data["from_center"]))
+        available_budget = Decimal(str(data["available_budget"]))
 
+        if from_center > available_budget:
+            errors.append(
+                f"المبلغ المحول [{from_center:,.2f}] يجب ان يكون اصغر من او يساوي المبلغ المتاح داخل الموازنة [{available_budget:,.2f}]"
+            )
     # Validation 5: Validate dynamic segments structure
     segments_data = data.get("segments", {})
     if segments_data:
@@ -247,9 +251,9 @@ def validate_transaction(data, code=None):
         errors.append("Can't have value in both from and to at the same time")
 
     # Validation 4: Check if available_budget > from_center
-    if code[0:3] != "AFR":
-        if Decimal(data["from_center"]) > Decimal(data["available_budget"]):
-            errors.append(" from value must be less or equal available_budget value")
+    #if code[0:3] != "AFR":
+    #    if Decimal(data["from_center"]) > Decimal(data["available_budget"]):
+    #        errors.append(" from value must be less or equal available_budget value")
 
     # Validation 5: Check for duplicate transfers (same transaction, from_account, to_account)
     existing_transfers = xx_TransactionTransfer.objects.filter(
@@ -726,6 +730,33 @@ class TransactionTransferListView(APIView):
         print(f"✅ MOFA_COST_2 available funds: {available}")
         return available
 
+    def _get_total_budget(self, segments_for_validation):
+        """
+        Get TOTAL_BUDGET for the MOFA_COST_2 control budget that match the provided segments.
+        """
+        filters = {}
+
+        for seg_id, seg_info in segments_for_validation.items():
+            # Try to get the segment code from any available field
+            seg_code = seg_info.get("code") or seg_info.get("from_code") or seg_info.get("to_code")
+            if seg_code:
+                filters[f"Segment{seg_id}"] = seg_code
+
+        print(f"🔍 MOFA_COST_2 Query filters: {filters}")
+        values = XX_Segment_Funds.objects.filter(**filters)
+        Fund_avaiable = 0.0
+        for Funds in values:
+            if Funds.CONTROL_BUDGET_NAME=="MOFA_CASH":
+              Fund_avaiable=Funds.FUNDS_AVAILABLE_PTD 
+            elif Funds.CONTROL_BUDGET_NAME=="MOFA_COST_2":
+                Total_budget=Funds.TOTAL_BUDGET     
+
+
+        
+
+      
+        return Fund_avaiable ,Total_budget
+
     def get(self, request):
         transaction_id = request.query_params.get("transaction")
         print(f"Transaction ID: {transaction_id}")
@@ -845,9 +876,11 @@ class TransactionTransferListView(APIView):
                 transfer.budget_adjustments = record.get("Budget_adjustments", 0.0)
                 transfer.commitments = record.get("Commitments", 0.0)
                 transfer.expenditures = record.get("Expenditures", 0.0)
-                transfer.initial_budget = record.get("Initial_budget", 0.0)
                 transfer.obligations = record.get("Obligation", 0.0)
                 transfer.other_consumption = record.get("Other", 0.0)
+                transfer.total_budget = record.get("Total_budget", 0.0)
+                transfer.initial_budget = record.get("Initial_budget", 0.0)
+
             else:
                 # No data found, set default values
                 transfer.available_budget = 0.0
@@ -860,6 +893,9 @@ class TransactionTransferListView(APIView):
                 transfer.initial_budget = 0.0
                 transfer.obligations = 0.0
                 transfer.other_consumption = 0.0
+                transfer.total_budget = 0.0
+                transfer.initial_budget = 0.0
+                transfer.budget_adjustments = 0.0
 
             transfer.save()
 
@@ -880,11 +916,16 @@ class TransactionTransferListView(APIView):
             available_budget = float(transfer_data.get("available_budget", 0))
             encumbrance = float(transfer_data.get("encumbrance", 0))
             actual = float(transfer_data.get("actual", 0))
-            
+            total_budget = float(transfer_data.get("total_budget", 0))
+            initial_budget = float(transfer_data.get("initial_budget", 0))
+            budget_adjustments = float(transfer_data.get("budget_adjustments", 0))
+            total_budget = float(transfer_data.get("total_budget", 0))
+
             # Build segments data for validation
             # Support both NEW SIMPLIFIED format (single code) and OLD format (from_code/to_code)
             segments_for_validation = {}
-            is_source = from_center > 0  # Determine direction
+            is_source = from_center > 0 
+            is_distination = to_center > 0
             
             for seg_id, seg_info in segments_dict.items():
                 # Check if we have from_code or to_code populated
@@ -924,6 +965,9 @@ class TransactionTransferListView(APIView):
                 "approved_budget": approved_budget,
                 "available_budget": available_budget,
                 "encumbrance": encumbrance,
+                "total_budget": total_budget,
+                "initial_budget": initial_budget,
+                "budget_adjustments": budget_adjustments,
                 "actual": actual,
                 "transfer_id": transfer_id,
                 "segments": segments_for_validation,
@@ -946,9 +990,23 @@ class TransactionTransferListView(APIView):
                     validation_errors.append(
                         "MOFA_COST_2 budget record not found for the provided segments"
                     )
-                elif from_center > (mofa_available/2):
+                else:
+                  half_available = mofa_available / 2
+
+                if from_center > half_available:
                     validation_errors.append(
-                        f"from amount {from_center} exceeds MOFA_COST_2 available funds {mofa_available/2}"
+                        f"اجمالى السيولة المنقولة [{from_center:,.2f}] من البند لا يجب ان تتخطى 50% "
+                        f"من اجمالى موازنة التكاليف المعتمدة للبند المنقول منه [{half_available:,.2f}]"
+                    )
+            elif is_distination > 0:
+                fund_ava,tot_budget = self._get_total_budget(segments_for_validation)
+                if tot_budget is None and fund_ava is None:
+                    validation_errors.append(
+                        "MOFA_COST_2 budget record not found for the provided segments"
+                    )
+                elif float(to_center) + float(fund_ava) > float(tot_budget):
+                    validation_errors.append(
+                        f"اجمالى سيولة البند (السيولة المتاحة للبند المنقول إليه + القيمة المنقولة) اكبر من اجمالى موازنة تكاليف البند المنقول الية  برجاء إعادة التوزيع {float(tot_budget):,.1f} "
                     )
 
             # Add validation results to transfer data
