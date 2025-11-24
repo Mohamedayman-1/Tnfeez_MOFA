@@ -818,12 +818,17 @@ class TransactionTransferListView(APIView):
         # Initialize managers for Oracle integration
         balance_manager = OracleBalanceReportManager()
         segment_mapper = OracleSegmentMapper()
-
+        
+        Total_from_Value=0
+        Total_to_Value=0
         for transfer in transfers:
             # Determine transfer direction FIRST
             from_center_val = float(transfer.from_center) if transfer.from_center not in [None, ""] else 0.0
             to_center_val = float(transfer.to_center) if transfer.to_center not in [None, ""] else 0.0
             is_source_transfer = from_center_val > 0  # True = taking funds (FROM), False = receiving funds (TO)
+
+            Total_to_Value+=to_center_val
+            Total_from_Value+=from_center_val
             
             # Build dynamic segment filters from transfer's XX_TransactionSegment records
             # Get all segments for this transfer (check both FROM and TO sides)
@@ -982,7 +987,7 @@ class TransactionTransferListView(APIView):
             validation_errors = validate_transaction_transfer_dynamic(
                 validation_data, code=transaction_object.code, errors=validation_errors
             )
-
+            
             # Additional MOFA_COST_2 validation for source transfers
             if from_center > 0:
                 mofa_available = self._get_mofa_cost2_available(segments_for_validation)
@@ -1008,7 +1013,18 @@ class TransactionTransferListView(APIView):
                     validation_errors.append(
                         f"اجمالى سيولة البند (السيولة المتاحة للبند المنقول إليه + القيمة المنقولة) اكبر من اجمالى موازنة تكاليف البند المنقول الية  برجاء إعادة التوزيع {float(tot_budget):,.1f} "
                     )
+            
 
+            if Total_from_Value > Total_to_Value:
+                 validation_errors.append(
+                    "  برجاء التحقق من قيمة ارصدت التوزيع حيث ان مجموع المنقول منه اكبر من مجموع المنقول اليه " 
+                    
+                    )
+            elif Total_from_Value < Total_to_Value:
+                validation_errors.append(
+                    "برجاء التحقق من قيمة ارصدت التوزيع حيث ان مجموع المنقول اليه اكبر من مجموع المنقول منه " 
+                )
+                    
             # Add validation results to transfer data
             transfer_response = transfer_data.copy()
             transfer_response["validation_errors"] = validation_errors
