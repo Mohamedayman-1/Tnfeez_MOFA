@@ -1657,691 +1657,691 @@ class TransactionTransferExcelUploadView(APIView):
             )
 
 
-class BudgetQuestionAnswerView(APIView):
-    """
-    AI-powered budget Q&A endpoint that answers 10 predefined questions with dynamic database queries.
-    Expects a POST request with a 'question' field containing a question number (1-10) or the full question text.
-    """
+# class BudgetQuestionAnswerView(APIView):
+#     """
+#     AI-powered budget Q&A endpoint that answers 10 predefined questions with dynamic database queries.
+#     Expects a POST request with a 'question' field containing a question number (1-10) or the full question text.
+#     """
 
-    # permission_classes = [IsAuthenticated]
+#     # permission_classes = [IsAuthenticated]
 
-    def post(self, request):
-        question_input = request.data.get("question", "").strip()
-        time.sleep(5)
+#     def post(self, request):
+#         question_input = request.data.get("question", "").strip()
+#         time.sleep(5)
         
-        if not question_input:
-            return Response(
-                {
-                    "error": "Question is required",
-                    "message": "Please provide a question number (1-10) or question text"
-                },
-                status=status.HTTP_400_BAD_REQUEST
-            )
+#         if not question_input:
+#             return Response(
+#                 {
+#                     "error": "Question is required",
+#                     "message": "Please provide a question number (1-10) or question text"
+#                 },
+#                 status=status.HTTP_400_BAD_REQUEST
+#             )
         
-        # Try to extract question number from input
-        question_number = self._extract_question_number(question_input)
+#         # Try to extract question number from input
+#         question_number = self._extract_question_number(question_input)
         
-        if question_number is None:
-            return Response(
-                {
-                    "error": "Invalid question",
-                    "message": "Please provide a valid question number (1-10) or one of the predefined questions",
-                    "available_questions": self._get_available_questions()
-                },
-                status=status.HTTP_400_BAD_REQUEST
-            )
+#         if question_number is None:
+#             return Response(
+#                 {
+#                     "error": "Invalid question",
+#                     "message": "Please provide a valid question number (1-10) or one of the predefined questions",
+#                     "available_questions": self._get_available_questions()
+#                 },
+#                 status=status.HTTP_400_BAD_REQUEST
+#             )
         
-        try:
-            # Route to appropriate question handler
-            answer_data = self._handle_question(question_number, request.user)
+#         try:
+#             # Route to appropriate question handler
+#             answer_data = self._handle_question(question_number, request.user)
             
-            return Response(
-                {
-                    "response": {
-                        "response": answer_data["answer"]
-                    }
-                },
-                status=status.HTTP_200_OK
-            )
+#             return Response(
+#                 {
+#                     "response": {
+#                         "response": answer_data["answer"]
+#                     }
+#                 },
+#                 status=status.HTTP_200_OK
+#             )
             
-        except Exception as e:
-            return Response(
-                {
-                    "error": "Error processing question",
-                    "message": str(e)
-                },
-                status=status.HTTP_500_INTERNAL_SERVER_ERROR
-            )
+#         except Exception as e:
+#             return Response(
+#                 {
+#                     "error": "Error processing question",
+#                     "message": str(e)
+#                 },
+#                 status=status.HTTP_500_INTERNAL_SERVER_ERROR
+#             )
     
-    def _normalize_text(self, text: str) -> str:
-        """Lowercase and remove punctuation and extra whitespace from text."""
-        return "".join(c for c in text.lower() if c not in string.punctuation).strip()
+#     def _normalize_text(self, text: str) -> str:
+#         """Lowercase and remove punctuation and extra whitespace from text."""
+#         return "".join(c for c in text.lower() if c not in string.punctuation).strip()
     
-    def _calculate_similarity(self, text_a: str, text_b: str) -> float:
-        """Return a similarity ratio between two strings."""
-        return difflib.SequenceMatcher(None, text_a, text_b).ratio()
+#     def _calculate_similarity(self, text_a: str, text_b: str) -> float:
+#         """Return a similarity ratio between two strings."""
+#         return difflib.SequenceMatcher(None, text_a, text_b).ratio()
     
-    def _extract_question_number(self, question_input):
-        """
-        Extract question number from input string using fuzzy matching.
-        Uses both keyword matching and similarity scoring for powerful question recognition.
-        """
-        # Direct number check
-        if question_input.isdigit():
-            num = int(question_input)
-            if 1 <= num <= 11:
-                return num
+#     def _extract_question_number(self, question_input):
+#         """
+#         Extract question number from input string using fuzzy matching.
+#         Uses both keyword matching and similarity scoring for powerful question recognition.
+#         """
+#         # Direct number check
+#         if question_input.isdigit():
+#             num = int(question_input)
+#             if 1 <= num <= 11:
+#                 return num
         
-        # Define question examples with keywords for hybrid matching
-        question_examples = {
-            1: {
-                "text": "What is the current status of our budget envelopes?",
-                "keywords": ["budget", "envelope", "status"],
-                "alternatives": [
-                    "show budget envelope",
-                    "budget envelope status",
-                    "current budget envelope"
-                ]
-            },
-            2: {
-                "text": "Show me pending budget transfers.",
-                "keywords": ["pending", "transfer"],
-                "alternatives": [
-                    "pending transfers",
-                    "show pending budget transfers",
-                    "what transfers are pending"
-                ]
-            },
-            3: {
-                "text": "What is the Capex for the current year?",
-                "keywords": ["capex", "current", "year"],
-                "alternatives": [
-                    "current year capex",
-                    "capex this year",
-                    "this year capex"
-                ]
-            },
-            4: {
-                "text": "What is the Capex for last year?",
-                "keywords": ["capex", "last", "year"],
-                "alternatives": [
-                    "last year capex",
-                    "capex previous year",
-                    "previous year capex"
-                ]
-            },
-            5: {
-                "text": "What is the breakdown of transfers vs additional budget?",
-                "keywords": ["breakdown", "transfer", "additional"],
-                "alternatives": [
-                    "transfers vs additional budget",
-                    "breakdown transfers additional",
-                    "compare transfers and additional budget"
-                ]
-            },
-            6: {
-                "text": "What percentage of total transactions are still pending?",
-                "keywords": ["percentage", "pending", "transaction"],
-                "alternatives": [
-                    "pending percentage",
-                    "what percent pending",
-                    "percentage of pending transactions"
-                ]
-            },
-            7: {
-                "text": "How many transactions are still pending vs approved?",
-                "keywords": ["pending", "approved", "transaction"],
-                "alternatives": [
-                    "pending vs approved",
-                    "pending and approved transactions",
-                    "compare pending approved"
-                ]
-            },
-            8: {
-                "text": "How many units have requested so far?",
-                "keywords": ["units", "requested"],
-                "alternatives": [
-                    "units requested",
-                    "how many units",
-                    "number of units requested"
-                ]
-            },
-            9: {
-                "text": "What is the total fund I have in my Unit?",
-                "keywords": ["total", "fund", "unit"],
-                "alternatives": [
-                    "total fund in unit",
-                    "my unit total fund",
-                    "how much fund in unit"
-                ]
-            },
-            10: {
-                "text": "How many amount is blocked till now?",
-                "keywords": ["amount", "blocked"],
-                "alternatives": [
-                    "blocked amount",
-                    "how much blocked",
-                    "total blocked amount"
-                ]
-            },
-            11: {
-                "text": "If I do a transfer with 150M AED, what will be the impact on my budget envelope?",
-                "keywords": ["transfer", "impact", "envelope"],
-                "alternatives": [
-                    "transfer impact on envelope",
-                    "impact of transfer on budget envelope",
-                    "what happens if i transfer to envelope",
-                    "transfer effect on budget"
-                ]
-            }
-        }
+#         # Define question examples with keywords for hybrid matching
+#         question_examples = {
+#             1: {
+#                 "text": "What is the current status of our budget envelopes?",
+#                 "keywords": ["budget", "envelope", "status"],
+#                 "alternatives": [
+#                     "show budget envelope",
+#                     "budget envelope status",
+#                     "current budget envelope"
+#                 ]
+#             },
+#             2: {
+#                 "text": "Show me pending budget transfers.",
+#                 "keywords": ["pending", "transfer"],
+#                 "alternatives": [
+#                     "pending transfers",
+#                     "show pending budget transfers",
+#                     "what transfers are pending"
+#                 ]
+#             },
+#             3: {
+#                 "text": "What is the Capex for the current year?",
+#                 "keywords": ["capex", "current", "year"],
+#                 "alternatives": [
+#                     "current year capex",
+#                     "capex this year",
+#                     "this year capex"
+#                 ]
+#             },
+#             4: {
+#                 "text": "What is the Capex for last year?",
+#                 "keywords": ["capex", "last", "year"],
+#                 "alternatives": [
+#                     "last year capex",
+#                     "capex previous year",
+#                     "previous year capex"
+#                 ]
+#             },
+#             5: {
+#                 "text": "What is the breakdown of transfers vs additional budget?",
+#                 "keywords": ["breakdown", "transfer", "additional"],
+#                 "alternatives": [
+#                     "transfers vs additional budget",
+#                     "breakdown transfers additional",
+#                     "compare transfers and additional budget"
+#                 ]
+#             },
+#             6: {
+#                 "text": "What percentage of total transactions are still pending?",
+#                 "keywords": ["percentage", "pending", "transaction"],
+#                 "alternatives": [
+#                     "pending percentage",
+#                     "what percent pending",
+#                     "percentage of pending transactions"
+#                 ]
+#             },
+#             7: {
+#                 "text": "How many transactions are still pending vs approved?",
+#                 "keywords": ["pending", "approved", "transaction"],
+#                 "alternatives": [
+#                     "pending vs approved",
+#                     "pending and approved transactions",
+#                     "compare pending approved"
+#                 ]
+#             },
+#             8: {
+#                 "text": "How many units have requested so far?",
+#                 "keywords": ["units", "requested"],
+#                 "alternatives": [
+#                     "units requested",
+#                     "how many units",
+#                     "number of units requested"
+#                 ]
+#             },
+#             9: {
+#                 "text": "What is the total fund I have in my Unit?",
+#                 "keywords": ["total", "fund", "unit"],
+#                 "alternatives": [
+#                     "total fund in unit",
+#                     "my unit total fund",
+#                     "how much fund in unit"
+#                 ]
+#             },
+#             10: {
+#                 "text": "How many amount is blocked till now?",
+#                 "keywords": ["amount", "blocked"],
+#                 "alternatives": [
+#                     "blocked amount",
+#                     "how much blocked",
+#                     "total blocked amount"
+#                 ]
+#             },
+#             11: {
+#                 "text": "If I do a transfer with 150M AED, what will be the impact on my budget envelope?",
+#                 "keywords": ["transfer", "impact", "envelope"],
+#                 "alternatives": [
+#                     "transfer impact on envelope",
+#                     "impact of transfer on budget envelope",
+#                     "what happens if i transfer to envelope",
+#                     "transfer effect on budget"
+#                 ]
+#             }
+#         }
         
-        # Normalize user input
-        user_normalized = self._normalize_text(question_input)
+#         # Normalize user input
+#         user_normalized = self._normalize_text(question_input)
         
-        # Track best matches
-        best_match = None
-        best_score = 0.0
-        similarity_threshold = 0.5  # Minimum similarity score
+#         # Track best matches
+#         best_match = None
+#         best_score = 0.0
+#         similarity_threshold = 0.5  # Minimum similarity score
         
-        # Check each question
-        for question_num, question_data in question_examples.items():
-            # Calculate similarity with main question text
-            main_text_normalized = self._normalize_text(question_data["text"])
-            main_similarity = self._calculate_similarity(user_normalized, main_text_normalized)
+#         # Check each question
+#         for question_num, question_data in question_examples.items():
+#             # Calculate similarity with main question text
+#             main_text_normalized = self._normalize_text(question_data["text"])
+#             main_similarity = self._calculate_similarity(user_normalized, main_text_normalized)
             
-            # Calculate similarity with alternatives
-            alt_similarities = [
-                self._calculate_similarity(user_normalized, self._normalize_text(alt))
-                for alt in question_data["alternatives"]
-            ]
+#             # Calculate similarity with alternatives
+#             alt_similarities = [
+#                 self._calculate_similarity(user_normalized, self._normalize_text(alt))
+#                 for alt in question_data["alternatives"]
+#             ]
             
-            # Get max similarity from main text and alternatives
-            max_similarity = max([main_similarity] + alt_similarities)
+#             # Get max similarity from main text and alternatives
+#             max_similarity = max([main_similarity] + alt_similarities)
             
-            # Check keyword matching (bonus points if all keywords present)
-            keyword_match = all(
-                keyword in user_normalized 
-                for keyword in question_data["keywords"]
-            )
+#             # Check keyword matching (bonus points if all keywords present)
+#             keyword_match = all(
+#                 keyword in user_normalized 
+#                 for keyword in question_data["keywords"]
+#             )
             
-            # Calculate final score (weighted combination)
-            # If keywords match, boost the similarity score
-            final_score = max_similarity
-            if keyword_match:
-                final_score = min(1.0, max_similarity + 0.2)  # Boost by 20% if keywords match
+#             # Calculate final score (weighted combination)
+#             # If keywords match, boost the similarity score
+#             final_score = max_similarity
+#             if keyword_match:
+#                 final_score = min(1.0, max_similarity + 0.2)  # Boost by 20% if keywords match
             
-            # Update best match if this score is higher
-            if final_score > best_score:
-                best_score = final_score
-                best_match = question_num
+#             # Update best match if this score is higher
+#             if final_score > best_score:
+#                 best_score = final_score
+#                 best_match = question_num
         
-        # Return best match if it meets the threshold
-        if best_score >= similarity_threshold:
-            return best_match
+#         # Return best match if it meets the threshold
+#         if best_score >= similarity_threshold:
+#             return best_match
         
-        return None
+#         return None
     
-    def _get_question_text(self, question_number):
-        """Return the full question text for a given number"""
-        questions = {
-            1: "What is the current status of our budget envelopes?",
-            2: "Show me pending budget transfers.",
-            3: "What is the Capex for the current year?",
-            4: "What is the Capex for last year?",
-            5: "What is the breakdown of transfers vs additional budget?",
-            6: "What percentage of total transactions are still pending?",
-            7: "How many transactions are still pending vs approved?",
-            8: "How many units have requested so far?",
-            9: "What is the total fund I have in my Unit?",
-            10: "How many amount is blocked till now?",
-            11: "If I do a transfer with 150M AED, what will be the impact on my budget envelope?"
-        }
-        return questions.get(question_number, "")
+#     def _get_question_text(self, question_number):
+#         """Return the full question text for a given number"""
+#         questions = {
+#             1: "What is the current status of our budget envelopes?",
+#             2: "Show me pending budget transfers.",
+#             3: "What is the Capex for the current year?",
+#             4: "What is the Capex for last year?",
+#             5: "What is the breakdown of transfers vs additional budget?",
+#             6: "What percentage of total transactions are still pending?",
+#             7: "How many transactions are still pending vs approved?",
+#             8: "How many units have requested so far?",
+#             9: "What is the total fund I have in my Unit?",
+#             10: "How many amount is blocked till now?",
+#             11: "If I do a transfer with 150M AED, what will be the impact on my budget envelope?"
+#         }
+#         return questions.get(question_number, "")
     
-    def _get_available_questions(self):
-        """Return list of all available questions"""
-        return [
-            {"number": i, "question": self._get_question_text(i)} 
-            for i in range(1, 12)
-        ]
+#     def _get_available_questions(self):
+#         """Return list of all available questions"""
+#         return [
+#             {"number": i, "question": self._get_question_text(i)} 
+#             for i in range(1, 12)
+#         ]
     
-    def _handle_question(self, question_number, user):
-        """Route to specific question handler based on number"""
-        handlers = {
-            1: self._answer_q1_budget_envelope_status,
-            2: self._answer_q2_pending_transfers,
-            3: self._answer_q3_current_year_capex,
-            4: self._answer_q4_last_year_capex,
-            5: self._answer_q5_transfers_vs_additional,
-            6: self._answer_q6_pending_percentage,
-            7: self._answer_q7_pending_vs_approved,
-            8: self._answer_q8_units_requested,
-            9: self._answer_q9_total_fund_in_unit,
-            10: self._answer_q10_blocked_amount,
-            11: self._answer_q11_transfer_impact
-        }
+#     def _handle_question(self, question_number, user):
+#         """Route to specific question handler based on number"""
+#         handlers = {
+#             1: self._answer_q1_budget_envelope_status,
+#             2: self._answer_q2_pending_transfers,
+#             3: self._answer_q3_current_year_capex,
+#             4: self._answer_q4_last_year_capex,
+#             5: self._answer_q5_transfers_vs_additional,
+#             6: self._answer_q6_pending_percentage,
+#             7: self._answer_q7_pending_vs_approved,
+#             8: self._answer_q8_units_requested,
+#             9: self._answer_q9_total_fund_in_unit,
+#             10: self._answer_q10_blocked_amount,
+#             11: self._answer_q11_transfer_impact
+#         }
         
-        handler = handlers.get(question_number)
-        if handler:
-            return handler(user)
-        else:
-            raise ValueError(f"No handler found for question {question_number}")
+#         handler = handlers.get(question_number)
+#         if handler:
+#             return handler(user)
+#         else:
+#             raise ValueError(f"No handler found for question {question_number}")
     
-    def _answer_q1_budget_envelope_status(self, user):
-        """Q1: What is the current status of our budget envelopes?"""
-        from django.db.models import Sum, F
-        from account_and_entitys.models import EnvelopeManager
+#     def _answer_q1_budget_envelope_status(self, user):
+#         """Q1: What is the current status of our budget envelopes?"""
+#         from django.db.models import Sum, F
+#         from account_and_entitys.models import EnvelopeManager
         
-        # Get envelope data for project 9000000
-        project_code = "9000000"
-        envelope_results = EnvelopeManager.Get_Current_Envelope_For_Project(
-            project_code=project_code
-        )
+#         # Get envelope data for project 9000000
+#         project_code = "9000000"
+#         envelope_results = EnvelopeManager.Get_Current_Envelope_For_Project(
+#             project_code=project_code
+#         )
         
-        # Extract envelope values
-        initial_envelope = float(envelope_results.get("initial_envelope", 0) or 0)
-        current_envelope = float(envelope_results.get("current_envelope", 0) or 0)
-        estimated_envelope = float(envelope_results.get("estimated_envelope", 0) or 0)
+#         # Extract envelope values
+#         initial_envelope = float(envelope_results.get("initial_envelope", 0) or 0)
+#         current_envelope = float(envelope_results.get("current_envelope", 0) or 0)
+#         estimated_envelope = float(envelope_results.get("estimated_envelope", 0) or 0)
         
-        # Use current_envelope as total allocated budget
-        total_allocated = current_envelope
+#         # Use current_envelope as total allocated budget
+#         total_allocated = current_envelope
         
-        # Calculate utilized amount (initial - current)
-        total_utilized = initial_envelope - current_envelope if initial_envelope > 0 else 0
+#         # Calculate utilized amount (initial - current)
+#         total_utilized = initial_envelope - current_envelope if initial_envelope > 0 else 0
         
-        # Remaining is the current envelope
-        remaining = current_envelope
+#         # Remaining is the current envelope
+#         remaining = current_envelope
         
-        # Calculate utilization percentage
-        utilization_pct = (total_utilized / initial_envelope * 100) if initial_envelope > 0 else 0
+#         # Calculate utilization percentage
+#         utilization_pct = (total_utilized / initial_envelope * 100) if initial_envelope > 0 else 0
         
-        # Format values in millions (AED)
-        allocated_millions = initial_envelope / 1_000_000
-        utilized_millions = total_utilized / 1_000_000
-        remaining_millions = remaining / 1_000_000
+#         # Format values in millions (AED)
+#         allocated_millions = initial_envelope / 1_000_000
+#         utilized_millions = total_utilized / 1_000_000
+#         remaining_millions = remaining / 1_000_000
         
-        answer = (
-            f"Your total allocated budget is AED {allocated_millions:,.1f} million. "
-            f"So far, AED {utilized_millions:,.1f} million has been utilized, "
-            f"leaving AED {remaining_millions:,.1f} million remaining. "
-            f"You are at {utilization_pct:,.0f}% of your total budget utilization."
-        )
+#         answer = (
+#             f"Your total allocated budget is AED {allocated_millions:,.1f} million. "
+#             f"So far, AED {utilized_millions:,.1f} million has been utilized, "
+#             f"leaving AED {remaining_millions:,.1f} million remaining. "
+#             f"You are at {utilization_pct:,.0f}% of your total budget utilization."
+#         )
         
-        return {
-            "answer": answer,
-            "data": {
-                "project_code": project_code,
-                "initial_envelope": initial_envelope,
-                "current_envelope": current_envelope,
-                "estimated_envelope": estimated_envelope,
-                "total_allocated": initial_envelope,
-                "total_utilized": total_utilized,
-                "remaining": remaining,
-                "utilization_percentage": round(utilization_pct, 2)
-            }
-        }
+#         return {
+#             "answer": answer,
+#             "data": {
+#                 "project_code": project_code,
+#                 "initial_envelope": initial_envelope,
+#                 "current_envelope": current_envelope,
+#                 "estimated_envelope": estimated_envelope,
+#                 "total_allocated": initial_envelope,
+#                 "total_utilized": total_utilized,
+#                 "remaining": remaining,
+#                 "utilization_percentage": round(utilization_pct, 2)
+#             }
+#         }
     
-    def _answer_q2_pending_transfers(self, user):
-        """Q2: Show me pending budget transfers."""
-        from django.db.models import Count, Sum
-        from datetime import datetime, timedelta
-        from approvals.models import ApprovalWorkflowInstance
+#     def _answer_q2_pending_transfers(self, user):
+#         """Q2: Show me pending budget transfers."""
+#         from django.db.models import Count, Sum
+#         from datetime import datetime, timedelta
+#         from approvals.models import ApprovalWorkflowInstance
         
-        # Get pending transfers based on workflow approval status
-        # A transfer is pending when its workflow instance status is 'in_progress'
-        pending_transfers = xx_BudgetTransfer.objects.filter(
-            workflow_instance__status=ApprovalWorkflowInstance.STATUS_IN_PROGRESS
-        )
+#         # Get pending transfers based on workflow approval status
+#         # A transfer is pending when its workflow instance status is 'in_progress'
+#         pending_transfers = xx_BudgetTransfer.objects.filter(
+#             workflow_instance__status=ApprovalWorkflowInstance.STATUS_IN_PROGRESS
+#         )
         
-        count = pending_transfers.count()
-        total_amount = pending_transfers.aggregate(Sum('amount'))['amount__sum'] or 0
+#         count = pending_transfers.count()
+#         total_amount = pending_transfers.aggregate(Sum('amount'))['amount__sum'] or 0
         
-        # Find oldest pending transfer
-        oldest_transfer = pending_transfers.order_by('request_date').first()
+#         # Find oldest pending transfer
+#         oldest_transfer = pending_transfers.order_by('request_date').first()
         
-        if oldest_transfer:
-            days_ago = (timezone.now() - oldest_transfer.request_date).days
-            oldest_info = f"The oldest pending transfer was submitted {days_ago} days ago"
-        else:
-            oldest_info = "No pending transfers"
-            days_ago = 0
+#         if oldest_transfer:
+#             days_ago = (timezone.now() - oldest_transfer.request_date).days
+#             oldest_info = f"The oldest pending transfer was submitted {days_ago} days ago"
+#         else:
+#             oldest_info = "No pending transfers"
+#             days_ago = 0
         
-        # Format amount
-        amount_k = total_amount / 1000
+#         # Format amount
+#         amount_k = total_amount / 1000
         
-        answer = (
-            f"There are {count} pending budget transfer requests — totaling AED {amount_k:,.0f}K. "
-            f"{oldest_info} and is awaiting approval."
-        )
+#         answer = (
+#             f"There are {count} pending budget transfer requests — totaling AED {amount_k:,.0f}K. "
+#             f"{oldest_info} and is awaiting approval."
+#         )
         
-        # Get list of pending transfers with details
-        pending_list = []
-        for transfer in pending_transfers[:10]:  # Limit to 10 for performance
-            # Get workflow status
-            workflow_status = None
-            current_stage = None
-            if hasattr(transfer, 'workflow_instance'):
-                workflow_status = transfer.workflow_instance.status
-                if transfer.workflow_instance.current_stage_template:
-                    current_stage = transfer.workflow_instance.current_stage_template.name
+#         # Get list of pending transfers with details
+#         pending_list = []
+#         for transfer in pending_transfers[:10]:  # Limit to 10 for performance
+#             # Get workflow status
+#             workflow_status = None
+#             current_stage = None
+#             if hasattr(transfer, 'workflow_instance'):
+#                 workflow_status = transfer.workflow_instance.status
+#                 if transfer.workflow_instance.current_stage_template:
+#                     current_stage = transfer.workflow_instance.current_stage_template.name
             
-            pending_list.append({
-                "transaction_id": transfer.transaction_id,
-                "amount": float(transfer.amount),
-                "request_date": transfer.request_date,
-                "days_pending": (timezone.now() - transfer.request_date).days,
-                "workflow_status": workflow_status,
-                "current_stage": current_stage,
-                "code": transfer.code
-            })
+#             pending_list.append({
+#                 "transaction_id": transfer.transaction_id,
+#                 "amount": float(transfer.amount),
+#                 "request_date": transfer.request_date,
+#                 "days_pending": (timezone.now() - transfer.request_date).days,
+#                 "workflow_status": workflow_status,
+#                 "current_stage": current_stage,
+#                 "code": transfer.code
+#             })
         
-        return {
-            "answer": answer,
-            "data": {
-                "count": count,
-                "total_amount": float(total_amount),
-                "oldest_days": days_ago,
-                "pending_transfers": pending_list
-            }
-        }
+#         return {
+#             "answer": answer,
+#             "data": {
+#                 "count": count,
+#                 "total_amount": float(total_amount),
+#                 "oldest_days": days_ago,
+#                 "pending_transfers": pending_list
+#             }
+#         }
     
-    def _answer_q3_current_year_capex(self, user):
-        """Q3: What is the Capex for the current year?"""
+#     def _answer_q3_current_year_capex(self, user):
+#         """Q3: What is the Capex for the current year?"""
        
-        answer = (
-            f"The approved Capex for FY 2025 is AED 20 million. "
-        )
+#         answer = (
+#             f"The approved Capex for FY 2025 is AED 20 million. "
+#         )
         
-        return {
-            "answer": answer
-        }
+#         return {
+#             "answer": answer
+#         }
     
-    def _answer_q4_last_year_capex(self, user):
-        """Q4: What is the Capex for last year?"""
+#     def _answer_q4_last_year_capex(self, user):
+#         """Q4: What is the Capex for last year?"""
         
-        answer = (
-            f"In FY 24, Capex spending totaled AED 20 million. "
-        )
+#         answer = (
+#             f"In FY 24, Capex spending totaled AED 20 million. "
+#         )
         
-        return {
-            "answer": answer
-        }
+#         return {
+#             "answer": answer
+#         }
     
-    def _answer_q5_transfers_vs_additional(self, user):
-        """Q5: What is the breakdown of transfers vs additional budget?"""
-        from django.db.models import Q, Count, Sum
-        import calendar
+#     def _answer_q5_transfers_vs_additional(self, user):
+#         """Q5: What is the breakdown of transfers vs additional budget?"""
+#         from django.db.models import Q, Count, Sum
+#         import calendar
         
         
      
-        # Get transactions for current quarter
-        # FAR codes are normal transfers
-        # AFR codes are additional budget requests
+#         # Get transactions for current quarter
+#         # FAR codes are normal transfers
+#         # AFR codes are additional budget requests
         
-        quarter_transactions = xx_BudgetTransfer.objects.all()
+#         quarter_transactions = xx_BudgetTransfer.objects.all()
         
-        # Separate transfers (FAR) vs additional budget (AFR) based on code
-        transfers = quarter_transactions.filter(code__startswith='FAR')
-        additional_budget = quarter_transactions.filter(code__startswith='AFR')
+#         # Separate transfers (FAR) vs additional budget (AFR) based on code
+#         transfers = quarter_transactions.filter(code__startswith='FAR')
+#         additional_budget = quarter_transactions.filter(code__startswith='AFR')
 
-        transfer_amount = transfers.aggregate(Sum('amount'))['amount__sum'] or 0
-        additional_amount = additional_budget.aggregate(Sum('amount'))['amount__sum'] or 0
+#         transfer_amount = transfers.aggregate(Sum('amount'))['amount__sum'] or 0
+#         additional_amount = additional_budget.aggregate(Sum('amount'))['amount__sum'] or 0
         
-        total_amount = transfer_amount + additional_amount
+#         total_amount = transfer_amount + additional_amount
         
-        transfer_pct = (transfer_amount / total_amount * 100) if total_amount > 0 else 0
-        additional_pct = (additional_amount / total_amount * 100) if total_amount > 0 else 0
+#         transfer_pct = (transfer_amount / total_amount * 100) if total_amount > 0 else 0
+#         additional_pct = (additional_amount / total_amount * 100) if total_amount > 0 else 0
         
-        # Format in K
-        transfer_k = transfer_amount / 1000
-        additional_k = additional_amount / 1000
+#         # Format in K
+#         transfer_k = transfer_amount / 1000
+#         additional_k = additional_amount / 1000
         
-        answer = (
-            f"Transfers represent {transfer_pct:,.0f}% of transactions "
-            f"(AED {transfer_k:,.0f}K), while Additional Budget requests represent {additional_pct:,.0f}% "
-            f"(AED {additional_k:,.0f}K)."
-        )
+#         answer = (
+#             f"Transfers represent {transfer_pct:,.0f}% of transactions "
+#             f"(AED {transfer_k:,.0f}K), while Additional Budget requests represent {additional_pct:,.0f}% "
+#             f"(AED {additional_k:,.0f}K)."
+#         )
         
-        return {
-            "answer": answer
-        }
+#         return {
+#             "answer": answer
+#         }
     
-    def _answer_q6_pending_percentage(self, user):
-        """Q6: What percentage of total transactions are still pending?"""
-        from django.db.models import Count
-        from approvals.models import ApprovalWorkflowInstance
+#     def _answer_q6_pending_percentage(self, user):
+#         """Q6: What percentage of total transactions are still pending?"""
+#         from django.db.models import Count
+#         from approvals.models import ApprovalWorkflowInstance
         
-        # Total transactions
-        total_count = xx_BudgetTransfer.objects.count()
+#         # Total transactions
+#         total_count = xx_BudgetTransfer.objects.count()
         
-        # Pending transactions based on workflow approval status
-        # A transfer is pending when its workflow instance status is 'in_progress'
-        pending_count = xx_BudgetTransfer.objects.filter(
-            workflow_instance__status=ApprovalWorkflowInstance.STATUS_IN_PROGRESS
-        ).count()
+#         # Pending transactions based on workflow approval status
+#         # A transfer is pending when its workflow instance status is 'in_progress'
+#         pending_count = xx_BudgetTransfer.objects.filter(
+#             workflow_instance__status=ApprovalWorkflowInstance.STATUS_IN_PROGRESS
+#         ).count()
         
-        # Approved transactions based on workflow approval status
-        # A transfer is approved when its workflow instance status is 'approved'
-        approved_count = xx_BudgetTransfer.objects.filter(
-            workflow_instance__status=ApprovalWorkflowInstance.STATUS_APPROVED
-        ).count()
+#         # Approved transactions based on workflow approval status
+#         # A transfer is approved when its workflow instance status is 'approved'
+#         approved_count = xx_BudgetTransfer.objects.filter(
+#             workflow_instance__status=ApprovalWorkflowInstance.STATUS_APPROVED
+#         ).count()
         
-        pending_pct = (pending_count / total_count * 100) if total_count > 0 else 0
-        approved_pct = (approved_count / total_count * 100) if total_count > 0 else 0
+#         pending_pct = (pending_count / total_count * 100) if total_count > 0 else 0
+#         approved_pct = (approved_count / total_count * 100) if total_count > 0 else 0
         
-        answer = (
-            f"{pending_pct:,.0f}% of all budget transactions are pending approval "
-            f"({pending_count:,} out of {total_count:,} requests). "
-            f"{approved_pct:,.0f}% have already been approved and posted to the ledger."
-        )
+#         answer = (
+#             f"{pending_pct:,.0f}% of all budget transactions are pending approval "
+#             f"({pending_count:,} out of {total_count:,} requests). "
+#             f"{approved_pct:,.0f}% have already been approved and posted to the ledger."
+#         )
         
-        return {
-            "answer": answer,
-            "data": {
-                "total_transactions": total_count,
-                "pending_count": pending_count,
-                "approved_count": approved_count,
-                "pending_percentage": round(pending_pct, 2),
-                "approved_percentage": round(approved_pct, 2)
-            }
-        }
+#         return {
+#             "answer": answer,
+#             "data": {
+#                 "total_transactions": total_count,
+#                 "pending_count": pending_count,
+#                 "approved_count": approved_count,
+#                 "pending_percentage": round(pending_pct, 2),
+#                 "approved_percentage": round(approved_pct, 2)
+#             }
+#         }
     
-    def _answer_q7_pending_vs_approved(self, user):
-        """Q7: How many transactions are still pending vs approved?"""
-        from django.db.models import Avg, F
-        from datetime import timedelta
-        from approvals.models import ApprovalWorkflowInstance
+#     def _answer_q7_pending_vs_approved(self, user):
+#         """Q7: How many transactions are still pending vs approved?"""
+#         from django.db.models import Avg, F
+#         from datetime import timedelta
+#         from approvals.models import ApprovalWorkflowInstance
         
-        # Total requests
-        total_count = xx_BudgetTransfer.objects.count()
+#         # Total requests
+#         total_count = xx_BudgetTransfer.objects.count()
         
-        # Pending based on workflow approval status
-        # A transfer is pending when its workflow instance status is 'in_progress'
-        pending_count = xx_BudgetTransfer.objects.filter(
-            workflow_instance__status=ApprovalWorkflowInstance.STATUS_IN_PROGRESS
-        ).count()
+#         # Pending based on workflow approval status
+#         # A transfer is pending when its workflow instance status is 'in_progress'
+#         pending_count = xx_BudgetTransfer.objects.filter(
+#             workflow_instance__status=ApprovalWorkflowInstance.STATUS_IN_PROGRESS
+#         ).count()
         
-        # Approved based on workflow approval status
-        # A transfer is approved when its workflow instance status is 'approved'
-        approved_transactions = xx_BudgetTransfer.objects.filter(
-            workflow_instance__status=ApprovalWorkflowInstance.STATUS_APPROVED
-        )
-        approved_count = approved_transactions.count()
+#         # Approved based on workflow approval status
+#         # A transfer is approved when its workflow instance status is 'approved'
+#         approved_transactions = xx_BudgetTransfer.objects.filter(
+#             workflow_instance__status=ApprovalWorkflowInstance.STATUS_APPROVED
+#         )
+#         approved_count = approved_transactions.count()
         
-        pending_pct = (pending_count / total_count * 100) if total_count > 0 else 0
-        approved_pct = (approved_count / total_count * 100) if total_count > 0 else 0
+#         pending_pct = (pending_count / total_count * 100) if total_count > 0 else 0
+#         approved_pct = (approved_count / total_count * 100) if total_count > 0 else 0
         
-        # Calculate average approval time
-        # Use workflow instance finished_at time for approved transactions
-        approved_with_dates = approved_transactions.filter(
-            workflow_instance__finished_at__isnull=False,
-            request_date__isnull=False
-        ).select_related('workflow_instance')
+#         # Calculate average approval time
+#         # Use workflow instance finished_at time for approved transactions
+#         approved_with_dates = approved_transactions.filter(
+#             workflow_instance__finished_at__isnull=False,
+#             request_date__isnull=False
+#         ).select_related('workflow_instance')
         
-        if approved_with_dates.exists():
-            total_days = 0
-            count_with_dates = 0
-            for txn in approved_with_dates:
-                if txn.workflow_instance.finished_at and txn.request_date:
-                    # Convert both to datetime for comparison
-                    finished_date = txn.workflow_instance.finished_at
-                    if hasattr(finished_date, 'date'):
-                        finished_date = finished_date.date()
+#         if approved_with_dates.exists():
+#             total_days = 0
+#             count_with_dates = 0
+#             for txn in approved_with_dates:
+#                 if txn.workflow_instance.finished_at and txn.request_date:
+#                     # Convert both to datetime for comparison
+#                     finished_date = txn.workflow_instance.finished_at
+#                     if hasattr(finished_date, 'date'):
+#                         finished_date = finished_date.date()
                     
-                    request_date = txn.request_date
-                    if hasattr(request_date, 'date'):
-                        request_date = request_date.date()
+#                     request_date = txn.request_date
+#                     if hasattr(request_date, 'date'):
+#                         request_date = request_date.date()
                     
-                    days = (finished_date - request_date).days
-                    total_days += days
-                    count_with_dates += 1
+#                     days = (finished_date - request_date).days
+#                     total_days += days
+#                     count_with_dates += 1
             
-            avg_approval_days = total_days / count_with_dates if count_with_dates > 0 else 0
-        else:
-            avg_approval_days = 0
+#             avg_approval_days = total_days / count_with_dates if count_with_dates > 0 else 0
+#         else:
+#             avg_approval_days = 0
         
-        answer = (
-            f"Out of {total_count:,} total requests: {pending_count:,} pending ({pending_pct:,.0f}%), "
-            f"{approved_count:,} approved ({approved_pct:,.0f}%). "
-            f"The average approval time is {avg_approval_days:,.1f} days."
-        )
+#         answer = (
+#             f"Out of {total_count:,} total requests: {pending_count:,} pending ({pending_pct:,.0f}%), "
+#             f"{approved_count:,} approved ({approved_pct:,.0f}%). "
+#             f"The average approval time is {avg_approval_days:,.1f} days."
+#         )
         
-        return {
-            "answer": answer,
-            "data": {
-                "total_requests": total_count,
-                "pending_count": pending_count,
-                "pending_percentage": round(pending_pct, 2),
-                "approved_count": approved_count,
-                "approved_percentage": round(approved_pct, 2),
-                "average_approval_days": round(avg_approval_days, 1)
-            }
-        }
+#         return {
+#             "answer": answer,
+#             "data": {
+#                 "total_requests": total_count,
+#                 "pending_count": pending_count,
+#                 "pending_percentage": round(pending_pct, 2),
+#                 "approved_count": approved_count,
+#                 "approved_percentage": round(approved_pct, 2),
+#                 "average_approval_days": round(avg_approval_days, 1)
+#             }
+#         }
     
-    def _answer_q8_units_requested(self, user):
-        """Q8: How many units have requested so far?"""
-        from approvals.models import ApprovalWorkflowInstance
+#     def _answer_q8_units_requested(self, user):
+#         """Q8: How many units have requested so far?"""
+#         from approvals.models import ApprovalWorkflowInstance
         
-        # Get the number of pending transactions based on workflow status
-        # A transfer is pending when its workflow instance status is 'in_progress'
-        pending_count = xx_BudgetTransfer.objects.filter(
-            workflow_instance__status=ApprovalWorkflowInstance.STATUS_IN_PROGRESS
-        ).count()
+#         # Get the number of pending transactions based on workflow status
+#         # A transfer is pending when its workflow instance status is 'in_progress'
+#         pending_count = xx_BudgetTransfer.objects.filter(
+#             workflow_instance__status=ApprovalWorkflowInstance.STATUS_IN_PROGRESS
+#         ).count()
         
-        answer = (
-            f"There are {pending_count:,} pending transactions that have requested budget transfers so far."
-        )
+#         answer = (
+#             f"There are {pending_count:,} pending transactions that have requested budget transfers so far."
+#         )
         
-        return {
-            "answer": answer,
-            "data": {
-                "units_requested": pending_count
-            }
-        }
+#         return {
+#             "answer": answer,
+#             "data": {
+#                 "units_requested": pending_count
+#             }
+#         }
     
-    def _answer_q9_total_fund_in_unit(self, user):
-        """Q9: What is the total fund I have in my Unit?"""
-        from account_and_entitys.models import EnvelopeManager
+#     def _answer_q9_total_fund_in_unit(self, user):
+#         """Q9: What is the total fund I have in my Unit?"""
+#         from account_and_entitys.models import EnvelopeManager
         
-        # Get envelope data for project 9000000 (current envelope)
-        project_code = "9000000"
-        envelope_results = EnvelopeManager.Get_Current_Envelope_For_Project(
-            project_code=project_code
-        )
+#         # Get envelope data for project 9000000 (current envelope)
+#         project_code = "9000000"
+#         envelope_results = EnvelopeManager.Get_Current_Envelope_For_Project(
+#             project_code=project_code
+#         )
         
-        # Extract current envelope value
-        current_envelope = float(envelope_results.get("current_envelope", 0) or 0)
+#         # Extract current envelope value
+#         current_envelope = float(envelope_results.get("current_envelope", 0) or 0)
         
-        # Format in millions (AED)
-        envelope_millions = current_envelope / 1_000_000
+#         # Format in millions (AED)
+#         envelope_millions = current_envelope / 1_000_000
         
-        answer = (
-            f"The total fund available in your unit is AED {envelope_millions:,.2f} million."
-        )
+#         answer = (
+#             f"The total fund available in your unit is AED {envelope_millions:,.2f} million."
+#         )
         
-        return {
-            "answer": answer,
-            "data": {
-                "project_code": project_code,
-                "current_envelope": current_envelope,
-                "envelope_millions": round(envelope_millions, 2)
-            }
-        }
+#         return {
+#             "answer": answer,
+#             "data": {
+#                 "project_code": project_code,
+#                 "current_envelope": current_envelope,
+#                 "envelope_millions": round(envelope_millions, 2)
+#             }
+#         }
     
-    def _answer_q10_blocked_amount(self, user):
-        """Q10: How many amount is blocked till now?"""
-        from django.db.models import Sum
-        from approvals.models import ApprovalWorkflowInstance
+#     def _answer_q10_blocked_amount(self, user):
+#         """Q10: How many amount is blocked till now?"""
+#         from django.db.models import Sum
+#         from approvals.models import ApprovalWorkflowInstance
         
-        # Get the total amount of pending transfers based on workflow status
-        # A transfer is pending when its workflow instance status is 'in_progress'
-        pending_transfers = xx_BudgetTransfer.objects.filter(
-            workflow_instance__status=ApprovalWorkflowInstance.STATUS_IN_PROGRESS
-        )
+#         # Get the total amount of pending transfers based on workflow status
+#         # A transfer is pending when its workflow instance status is 'in_progress'
+#         pending_transfers = xx_BudgetTransfer.objects.filter(
+#             workflow_instance__status=ApprovalWorkflowInstance.STATUS_IN_PROGRESS
+#         )
         
-        total_blocked = pending_transfers.aggregate(Sum('amount'))['amount__sum'] or 0
+#         total_blocked = pending_transfers.aggregate(Sum('amount'))['amount__sum'] or 0
         
-        # Format in thousands (K)
-        blocked_k = total_blocked / 1000
+#         # Format in thousands (K)
+#         blocked_k = total_blocked / 1000
         
-        answer = (
-            f"The total amount blocked in pending transfers is AED {blocked_k:,.0f}K."
-        )
+#         answer = (
+#             f"The total amount blocked in pending transfers is AED {blocked_k:,.0f}K."
+#         )
         
-        return {
-            "answer": answer,
-            "data": {
-                "total_blocked_amount": float(total_blocked),
-                "blocked_amount_k": round(blocked_k, 2),
-                "pending_count": pending_transfers.count()
-            }
-        }
+#         return {
+#             "answer": answer,
+#             "data": {
+#                 "total_blocked_amount": float(total_blocked),
+#                 "blocked_amount_k": round(blocked_k, 2),
+#                 "pending_count": pending_transfers.count()
+#             }
+#         }
     
-    def _answer_q11_transfer_impact(self, user):
-        """Q11: If I do a transfer with 150M AED, what will be the impact on my budget envelope?"""
-        from account_and_entitys.models import EnvelopeManager
-        import re
+#     def _answer_q11_transfer_impact(self, user):
+#         """Q11: If I do a transfer with 150M AED, what will be the impact on my budget envelope?"""
+#         from account_and_entitys.models import EnvelopeManager
+#         import re
         
-        # Extract amount from the question if provided
-        # Default to 150M if not specified
-        transfer_amount = 150_000_000  # Default 150M
+#         # Extract amount from the question if provided
+#         # Default to 150M if not specified
+#         transfer_amount = 150_000_000  # Default 150M
 
-        # Try to extract amount from various formats (150M, 150000000, 150 M, etc.)
-        # This allows the question to be more flexible
+#         # Try to extract amount from various formats (150M, 150000000, 150 M, etc.)
+#         # This allows the question to be more flexible
         
-        # Get current envelope
-        project_code = "9000000"
-        envelope_results = EnvelopeManager.Get_Current_Envelope_For_Project(
-            project_code=project_code
-        )
+#         # Get current envelope
+#         project_code = "9000000"
+#         envelope_results = EnvelopeManager.Get_Current_Envelope_For_Project(
+#             project_code=project_code
+#         )
         
-        # Extract current envelope value
-        current_envelope = float(envelope_results.get("current_envelope", 0) or 0)
+#         # Extract current envelope value
+#         current_envelope = float(envelope_results.get("current_envelope", 0) or 0)
         
-        # Calculate envelope after transfer
-        envelope_after_transfer = current_envelope - transfer_amount
+#         # Calculate envelope after transfer
+#         envelope_after_transfer = current_envelope - transfer_amount
         
-        # Format in millions (AED)
-        current_millions = current_envelope / 1_000_000
-        after_millions = envelope_after_transfer / 1_000_000
-        transfer_millions = transfer_amount / 1_000_000
+#         # Format in millions (AED)
+#         current_millions = current_envelope / 1_000_000
+#         after_millions = envelope_after_transfer / 1_000_000
+#         transfer_millions = transfer_amount / 1_000_000
 
-        answer = (
-            f"The envelope is currently AED {current_millions:,.2f} million. "
-            f"After a transfer of AED {transfer_millions:,.2f} million, the envelope will be AED {after_millions:,.2f} million."
-        )
+#         answer = (
+#             f"The envelope is currently AED {current_millions:,.2f} million. "
+#             f"After a transfer of AED {transfer_millions:,.2f} million, the envelope will be AED {after_millions:,.2f} million."
+#         )
         
-        return {
-            "answer": answer,
-            "data": {
-                "project_code": project_code,
-                "current_envelope": current_envelope,
-                "transfer_amount": transfer_amount,
-                "envelope_after_transfer": envelope_after_transfer,
-                "current_envelope_millions": round(current_millions, 2),
-                "after_transfer_millions": round(after_millions, 2),
-                "impact_millions": round((transfer_amount / 1_000_000), 2)
-            }
-        }
+#         return {
+#             "answer": answer,
+#             "data": {
+#                 "project_code": project_code,
+#                 "current_envelope": current_envelope,
+#                 "transfer_amount": transfer_amount,
+#                 "envelope_after_transfer": envelope_after_transfer,
+#                 "current_envelope_millions": round(current_millions, 2),
+#                 "after_transfer_millions": round(after_millions, 2),
+#                 "impact_millions": round((transfer_amount / 1_000_000), 2)
+#             }
+#         }
 
