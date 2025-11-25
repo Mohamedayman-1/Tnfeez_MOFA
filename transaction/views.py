@@ -659,11 +659,7 @@ class TransactionTransferListView(APIView):
               Fund_avaiable=Funds.FUNDS_AVAILABLE_PTD 
             elif Funds.CONTROL_BUDGET_NAME=="MOFA_COST_2":
                 Total_budget=Funds.TOTAL_BUDGET     
-
-
-        
-
-      
+     
         return Fund_avaiable ,Total_budget
 
     def get(self, request):
