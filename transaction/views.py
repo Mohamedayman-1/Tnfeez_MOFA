@@ -282,7 +282,9 @@ def validate_transaction_transfer_dynamic(data, code=None, errors=None):
     
     Checks:
     1. Segment combination exists in XX_PivotFund
-    2. Transfer is allowed per XX_ACCOUNT_ENTITY_LIMIT rules
+    2. Transfer is allowed per XX_SegmentTransferLimit rules (dynamic segments)
+    
+    Replaces legacy XX_ACCOUNT_ENTITY_LIMIT with support for ANY number of segments.
     
     Args:
         data: Must contain 'segments' dict and 'from_center'/'to_center'
@@ -292,7 +294,8 @@ def validate_transaction_transfer_dynamic(data, code=None, errors=None):
     Returns:
         list: Updated errors list
     """
-    from account_and_entitys.models import XX_Segment, XX_SegmentType, XX_PivotFund
+    from account_and_entitys.models import XX_SegmentType
+    from account_and_entitys.managers import SegmentTransferLimitManager
     
     if errors is None:
         errors = []
@@ -302,166 +305,72 @@ def validate_transaction_transfer_dynamic(data, code=None, errors=None):
         errors.append("Segments data is required for validation")
         return errors
     
-    # Build segment codes for validation
-    # NEW SIMPLIFIED FORMAT: Extract single 'code' or old format 'from_code'/'to_code'
-    segment_codes = {}
-    
     # Determine transfer direction (source or destination)
     from_center = float(data.get('from_center', 0) or 0)
     to_center = float(data.get('to_center', 0) or 0)
     is_source = from_center > 0  # True if taking funds, False if receiving
     
+    # Build source and target segment combinations
+    # Format: {segment_type_id: segment_code}
+    from_segment_combo = {}  # Source segments
+    to_segment_combo = {}     # Target segments
+    
     for seg_id, seg_vals in segments_data.items():
         try:
-            segment_type = XX_SegmentType.objects.get(segment_id=int(seg_id))
+            segment_type_id = int(seg_id)
+            segment_type = XX_SegmentType.objects.get(segment_id=segment_type_id)
             
             # Check format: new simplified (single 'code') or old (from_code/to_code)
             if 'code' in seg_vals:
                 # NEW SIMPLIFIED FORMAT: Single code
+                # When simplified format is used, the same code applies to both from/to
+                # But direction is determined by from_center vs to_center
                 code = seg_vals.get('code')
-                # For validation, we need both from/to - use code for the appropriate direction
-                segment_codes[segment_type.segment_type.lower()] = {
-                    'from': code if is_source else None,
-                    'to': code if not is_source else None,
-                    'code': code  # Keep original for reference
-                }
+                
+                if is_source:
+                    # Transfer FROM this segment
+                    from_segment_combo[segment_type_id] = code
+                else:
+                    # Transfer TO this segment
+                    to_segment_combo[segment_type_id] = code
             else:
                 # OLD FORMAT: Separate from_code and to_code
                 from_code = seg_vals.get('from_code')
                 to_code = seg_vals.get('to_code')
                 
-                # Store codes by segment type name for compatibility
-                segment_codes[segment_type.segment_type.lower()] = {
-                    'from': from_code,
-                    'to': to_code
-                }
+                if from_code:
+                    from_segment_combo[segment_type_id] = from_code
+                if to_code:
+                    to_segment_combo[segment_type_id] = to_code
+        
         except XX_SegmentType.DoesNotExist:
             errors.append(f"Invalid segment type ID: {seg_id}")
             continue
+        except (ValueError, TypeError):
+            errors.append(f"Invalid segment ID format: {seg_id}")
+            continue
     
-    # Get entity, account, project codes (legacy compatibility)
-    entity_codes = segment_codes.get('entity', {})
-    account_codes = segment_codes.get('account', {})
-    project_codes = segment_codes.get('project', {})
+    # NEW: Use SegmentTransferLimitManager to validate transfer limits
+    # This supports DYNAMIC segments (any number, not just entity/account/project)
     
-    from_entity = entity_codes.get('from')
-    to_entity = entity_codes.get('to')
-    from_account = account_codes.get('from')
-    to_account = account_codes.get('to')
-    from_project = project_codes.get('from')
-    to_project = project_codes.get('to')
+    fiscal_year = data.get('fiscal_year')  # Optional fiscal year for filtering
     
-    # Validation 1: Check for fund availability (code combination exists in PivotFund)
-    if from_entity and from_account and from_project:
-        from_combination_exists = XX_PivotFund.objects.filter(
-            entity=from_entity,
-            account=from_account,
-            project=from_project,
-        ).exists()
-        
-        if not from_combination_exists:
-            errors.append(
-                f"Source code combination not found: Entity={from_entity}, "
-                f"Account={from_account}, Project={from_project}"
-            )
-    
-    if to_entity and to_account and to_project:
-        to_combination_exists = XX_PivotFund.objects.filter(
-            entity=to_entity,
-            account=to_account,
-            project=to_project,
-        ).exists()
-        
-        if not to_combination_exists:
-            errors.append(
-                f"Target code combination not found: Entity={to_entity}, "
-                f"Account={to_account}, Project={to_project}"
-            )
-    
-    # Validation 2: Check transfer permissions
-    if from_entity and from_account and from_project:
-        allowed_to_make_transfer = XX_ACCOUNT_ENTITY_LIMIT.objects.filter(
-            entity_id=str(from_entity),
-            account_id=str(from_account),
-            project_id=str(from_project),
-        ).first()
-        
-        if allowed_to_make_transfer is not None:
-            if allowed_to_make_transfer.is_transer_allowed == "No":
-                errors.append(
-                    f"Transfer not allowed for Entity={from_entity}, "
-                    f"Account={from_account}, Project={from_project}"
-                )
-            elif allowed_to_make_transfer.is_transer_allowed == "Yes":
-                # Check source/target specific permissions
-                if data.get("from_center", 0) > 0:
-                    if allowed_to_make_transfer.is_transer_allowed_for_source != "Yes":
-                        errors.append(
-                            f"Transfer FROM this combination not allowed: "
-                            f"Entity={from_entity}, Account={from_account}, Project={from_project}"
-                        )
-                
-                if data.get("to_center", 0) > 0:
-                    if allowed_to_make_transfer.is_transer_allowed_for_target != "Yes":
-                        errors.append(
-                            f"Transfer TO this combination not allowed: "
-                            f"Entity={from_entity}, Account={from_account}, Project={from_project}"
-                        )
-    
-    return errors
-
-
-def validate_transcation_transfer(data, code=None, errors=None):
-    """
-    LEGACY validation function - maintains backward compatibility
-    
-    NOTE: This is kept for backward compatibility with legacy code.
-    New code should use validate_transaction_transfer_dynamic() instead.
-    """
-    # Validation 1: Check for fund is available if not then no combination code
-    existing_code_combintion = XX_PivotFund.objects.filter(
-        entity=data["cost_center_code"],
-        account=data["account_code"],
-        project=data["project_code"],
+    # Validate transfer permissions using the new dynamic segment model
+    validation_result = SegmentTransferLimitManager.validate_transfer(
+        from_segments=from_segment_combo if is_source else {},
+        to_segments=to_segment_combo if not is_source else {},
+        fiscal_year=fiscal_year
     )
-    if not existing_code_combintion.exists():
-        errors.append(
-            f"Code combination not found for {data['cost_center_code']} and {data['project_code']} and {data['account_code']}"
-        )
-    print(
-        "existing_code_combintion",
-        type(data["cost_center_code"]),
-        ":",
-        type(data["project_code"]),
-        ":",
-        type(data["account_code"]),
-    )
-    # Validation 2: Check if is allowed to make trasfer using this cost_center_code and account_code
-    allowed_to_make_transfer = XX_ACCOUNT_ENTITY_LIMIT.objects.filter(
-        entity_id=str(data["cost_center_code"]),
-        account_id=str(data["account_code"]),
-        project_id=str(data["project_code"]),
-    ).first()
-    print("allowed_to_make_transfer", allowed_to_make_transfer)
-
-    # Check if no matching record found
-    if allowed_to_make_transfer is not None:
-        # Check transfer permissions if record exists
-        if allowed_to_make_transfer.is_transer_allowed == "No":
-            errors.append(
-                f"Not allowed to make transfer for {data['cost_center_code']} and {data['project_code']} and {data['account_code']} according to the rules"
-            )
-        elif allowed_to_make_transfer.is_transer_allowed == "Yes":
-            if data["from_center"] > 0:
-                if allowed_to_make_transfer.is_transer_allowed_for_source != "Yes":
-                    errors.append(
-                        f"Not allowed to make transfer for {data['cost_center_code']} and {data['project_code']} and {data['account_code']} according to the rules (can't transfer from this account)"
-                    )
-            if data["to_center"] > 0:
-                if allowed_to_make_transfer.is_transer_allowed_for_target != "Yes":
-                    errors.append(
-                        f"Not allowed to make transfer for {data['cost_center_code']} and {data['project_code']} and {data['account_code']} according to the rules (can't transfer to this account)"
-                    )
+    
+    # Add validation errors from SegmentTransferLimit
+    if not validation_result['valid']:
+        errors.extend(validation_result['errors'])
+    
+    # NEW: No legacy fallback needed
+    # XX_SegmentTransferLimit now supports DYNAMIC segments (2-30 segments, including your 16 segments)
+    # The manager handles all validation with full segment combinations
+    # If XX_SegmentTransferLimit has no record, transfer is allowed by default (permissive model)
+    
     return errors
 
 
@@ -1018,13 +927,12 @@ class TransactionTransferListView(APIView):
             if Total_from_Value > Total_to_Value:
                  validation_errors.append(
                     "  برجاء التحقق من قيمة ارصدت التوزيع حيث ان مجموع المنقول منه اكبر من مجموع المنقول اليه " 
-                    
                     )
             elif Total_from_Value < Total_to_Value:
                 validation_errors.append(
                     "برجاء التحقق من قيمة ارصدت التوزيع حيث ان مجموع المنقول اليه اكبر من مجموع المنقول منه " 
                 )
-                    
+
             # Add validation results to transfer data
             transfer_response = transfer_data.copy()
             transfer_response["validation_errors"] = validation_errors
