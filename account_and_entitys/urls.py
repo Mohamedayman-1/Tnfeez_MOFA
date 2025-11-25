@@ -67,6 +67,7 @@ from .phase3_views import (
     SegmentTransferLimitDetailView,
     SegmentTransferLimitValidateView,
 )
+from .mapping.view import GFSMappingsUploadView
 
 urlpatterns = [
     # ============================================
@@ -195,6 +196,11 @@ urlpatterns = [
         "account-mapping/upload/",
         UploadAccountMappingView.as_view(),
         name="upload-account-mapping",
+    ),
+    path(
+        "gfs-mapping/upload/",
+        GFSMappingsUploadView.as_view(),
+        name="upload-gfs-mapping",
     ),
     # Mapping URLs
     path(

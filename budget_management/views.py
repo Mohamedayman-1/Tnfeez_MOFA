@@ -109,7 +109,7 @@ class CreateBudgetTransferView(APIView):
         transfer_type = request.data.get("type").upper()
         transfer_control_budget = request.data.get("budget_control", "")
 
-        if transfer_type in ["FAR", "AFR", "FAD"]:
+        if transfer_type in ["FAR", "AFR", "FAD", "DFA"]:
             prefix = f"{transfer_type}-"
         else:
 
@@ -741,10 +741,7 @@ class transcationtransferapprovel_reject(APIView):
                     target_user=OtherUser,
                 )
                 # Update pivot fund if final approval or rejection
-                pivot_updates = []
-                trasncation = xx_BudgetTransfer.objects.get(
-                    transaction_id=transaction_id
-                )
+                
                 isFinal, Status = ApprovalManager.is_workflow_finished(trasncation)
                 if isFinal:
                     trasfers = xx_TransactionTransfer.objects.filter(
@@ -754,7 +751,7 @@ class transcationtransferapprovel_reject(APIView):
                     try:
                         # Update the pivot fund
 
-                        if Status == "approved":
+                        if Status == "approved" :
                             # Queue background task for Oracle upload
                             upload_budget_to_oracle.delay(
                                 transaction_id=transaction_id,
@@ -765,8 +762,6 @@ class transcationtransferapprovel_reject(APIView):
                                 "status": "success",
                                 "message": "Transaction approved successfully"
                         })
-
-
                         if Status == "rejected":
                             upload_journal_to_oracle.delay(
                                     transaction_id=transaction_id,
@@ -779,13 +774,13 @@ class transcationtransferapprovel_reject(APIView):
                         })
                     
                     except Exception as e:
-                        pivot_updates.append(
+                        results.append(
                             {
+                                "transaction_id": transaction_id,
                                 "status": "error",
                                 "message": str(e),
                             }
                         )
-                        continue
 
                         # Add the result for this transaction
                     

@@ -1130,7 +1130,7 @@ class transcationtransferSubmit(APIView):
                         status=status.HTTP_400_BAD_REQUEST,
                     )
                 for transfer in transfers:
-                    if code[0:3] != "AFR":
+                    if code[0:3] == "FAR":
                         if transfer.from_center is None or transfer.from_center <= 0:
                             if transfer.to_center is None or transfer.to_center <= 0:
                                 return Response(
@@ -1148,12 +1148,21 @@ class transcationtransferSubmit(APIView):
                                 },
                                 status=status.HTTP_400_BAD_REQUEST,
                             )
-                    else:
+                    elif code[0:3] == "AFR":
                         if transfer.to_center <= 0:
                             return Response(
                                 {
                                     "error": "Invalid transfer amounts",
                                     "message": f"transfer must have to_center as positive. Transfer ID {transfer.transfer_id}",
+                                },
+                                status=status.HTTP_400_BAD_REQUEST,
+                            )
+                    elif code[0:3] == "DFR":
+                        if transfer.from_center <= 0:
+                            return Response(
+                                {
+                                    "error": "Invalid transfer amounts",
+                                    "message": f"transfer must have from_center as positive. Transfer ID {transfer.transfer_id}",
                                 },
                                 status=status.HTTP_400_BAD_REQUEST,
                             )

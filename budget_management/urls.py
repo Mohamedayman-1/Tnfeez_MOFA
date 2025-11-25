@@ -100,5 +100,5 @@ urlpatterns = [
         name="dashboard-budget-transfer",
     ),
 
-    path("transfers/Oracle/Status/", Oracle_Status.as_view(), name="transaction-mobile-approve-reject"),
+    path("transfers/Oracle/Status/", Oracle_Status.as_view()),
 ]

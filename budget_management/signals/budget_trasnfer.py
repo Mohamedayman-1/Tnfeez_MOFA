@@ -84,7 +84,7 @@ def Run_oracle_upload_journal_workflow(sender, instance, created, **kwargs):
             )
             
             # Check if code requires Oracle upload
-            if instance.code and instance.code[0:3] != "AFR":
+            if instance.code and instance.code[0:3] == "FAR":
                 # Queue the task in Celery (runs in background)
                 upload_journal_to_oracle.delay(
                     transaction_id=instance.transaction_id,
@@ -95,7 +95,7 @@ def Run_oracle_upload_journal_workflow(sender, instance, created, **kwargs):
                 )
             else:
                 logger.info(
-                    f"BudgetTransfer {instance.transaction_id} has AFR code, skipping Oracle journal upload"
+                    f"BudgetTransfer {instance.transaction_id} has DFR or AFR code, skipping Oracle journal upload"
                 )
                 
     except Exception as e:

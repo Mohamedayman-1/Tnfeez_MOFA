@@ -149,20 +149,22 @@ def upload_budget_to_oracle(self, transaction_id,entry_type="submit"):
                 "success": False,
                 "error": "No transfers found"
             }
+        budget_transfer.type="FAR"
         
-
-        upload_result,result_path =create_and_upload_journal(
-            transfers=transfers,
-            transaction_id=transaction_id,
-            entry_type="reject"
-        )
-        if not upload_result.get("success"):
-            logger.warning(f"Journal upload failed for transaction {transaction_id}: {upload_result.get('error')}")
-            error=upload_result.get('error','Unknown error')
-            return {
-                "success": False,
-                "error": error
-            }
+        
+        if budget_transfer.type=="FAR":
+            upload_result,result_path =create_and_upload_journal(
+                transfers=transfers,
+                transaction_id=transaction_id,
+                entry_type="reject"
+            )
+            if not upload_result.get("success"):
+                logger.warning(f"Journal upload failed for transaction {transaction_id}: {upload_result.get('error')}")
+                error=upload_result.get('error','Unknown error')
+                return {
+                    "success": False,
+                    "error": error
+                }
         
         logger.info(f"Journal upload succeeded for transaction {transaction_id}. Proceeding to budget upload.")
         upload_result, result_path = create_and_upload_budget(

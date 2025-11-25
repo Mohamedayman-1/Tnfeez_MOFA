@@ -1656,3 +1656,24 @@ class XX_SegmentMapping(models.Model):
     def save(self, *args, **kwargs):
         self.full_clean()
         super().save(*args, **kwargs)
+
+
+
+
+
+class XX_gfs_Mamping(models.Model):
+    """Model representing GFS code mappings"""
+
+    id = models.AutoField(primary_key=True)
+    To_Value = models.CharField(max_length=50)
+    From_value = models.CharField(max_length=50)
+    Target_value = models.CharField(max_length=50)
+
+    is_active = models.BooleanField(default=True)
+
+    def __str__(self):
+        return f"GFS Mapping {self.id}: To={self.To_Value}, From={self.From_value}, Target={self.Target_value}"
+
+    class Meta:
+        db_table = "XX_GFS_MAPPING__XX"
+        unique_together = ("To_Value", "Target_value")
