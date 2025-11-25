@@ -195,8 +195,8 @@ class BudgetTemplateManager:
 def create_budget_entry_data(
     transfers,
     transaction_id: int,
-    source_budget_type: str = "HYPERION",
-    source_budget_name: str = "MIC_HQ_MONTHLY",
+    source_budget_type: str,
+    source_budget_name: str,
     period_name: str = "1-25",
     currency_code: str = "AED",
 ) -> List[Dict[str, Any]]:
@@ -231,7 +231,7 @@ def create_budget_entry_data(
 
     # Generate batch identifiers
     timestamp = time.strftime("%Y%m%d_%H%M%S")
-    budget_name = f"{source_budget_name}_{transaction_id}"
+    # budget_name = f"{source_budget_name}_{transaction_id}"
 
     budget_entries = []
     line_number = 1
