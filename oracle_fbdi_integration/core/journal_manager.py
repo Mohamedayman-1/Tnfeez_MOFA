@@ -13,6 +13,7 @@ from typing import Dict, List, Any, Optional
 import pandas as pd
 from openpyxl import load_workbook
 
+from budget_management.models import xx_BudgetTransfer
 from oracle_fbdi_integration.core.file_utils import excel_to_csv_and_zip
 from account_and_entitys.oracle import OracleSegmentMapper
 
@@ -219,44 +220,26 @@ def create_journal_entry_data(
     for transfer in transfers:
         total_debit += getattr(transfer, "from_center", 0) or 0
 
-    # Create journal lines for each transfer (FROM side - debit entries)
-    journal_catgorays=["حجز من ميزانية السيولة","حجز من ميزانية التكاليف"]
-    for journal_catgoray in journal_catgorays:
-        batch_name = f"BATCH_{journal_catgoray}_{timestamp}_TXN_{transaction_id}"
-        for transfer in transfers:
-            from_amount = getattr(transfer, "from_center", 0) or 0
-            if from_amount > 0:
-                journal_entry = {
-                    "Status Code": "NEW",
-                    "Ledger ID": LEDGER_ID,
-                    "Effective Date of Transaction": ORACLE_EFFECTIVE_DATE,
-                    "Journal Source": ORACLE_JOURNAL_SOURCE,
-                    "Journal Category": journal_catgoray,
-                    "Currency Code": CURRENCY_CODE,
-                    "Journal Entry Creation Date": time.strftime("%Y-%m-%d"),
-                    "Actual Flag": "E",
-                    "Entered Debit Amount": from_amount if entry_type == "submit" else "",
-                    "Entered Credit Amount": from_amount if entry_type == "reject" else "",
-                    "REFERENCE1 (Batch Name)": batch_name,
-                    "REFERENCE2 (Batch Description)": batch_description,
-                    "REFERENCE4 (Journal Entry Name)": journal_name,
-                    "REFERENCE5 (Journal Entry Description)": journal_description,
-                    "REFERENCE10 (Journal Entry Line Description)": f"Debit transaction {transfer.transaction_id} transfer line {transfer.transfer_id}",
-                    "Encumbrance Type ID": ENCUMBRANCE_TYPE_ID,
-                    "Interface Group Identifier": group_id,
-                }
-                print("fill_all")
-                segment_data = mapper.build_fbdi_row(
-                    transaction_transfer=transfer,
-                    base_row=journal_entry,
-                    fill_all=True
-                )
-                sample_data.append(segment_data)
+    budget_trasnfer=xx_BudgetTransfer.objects.get(transaction_id=transaction_id)
 
-        if total_debit > 0 and transfers:
-            
-            # Static segment values for offsetting entry
-            offsetting_entry = {
+
+    # Create journal lines for each transfer (FROM side - debit entries)
+    journal_catgorays=os.getenv("ORACLE_journal_catgorays")
+    journal_catgorays=journal_catgorays.split(",")
+    print(f"journal_catgorays: {journal_catgorays}")
+    journal_catgoray=""
+    if budget_trasnfer.control_budget=="سيولة":
+        journal_catgoray=journal_catgorays[0]
+    elif budget_trasnfer.control_budget=="تكاليف":
+        journal_catgoray=journal_catgorays[1]
+
+    print(f"journal_catgoray: {journal_catgoray}")
+
+    batch_name = f"BATCH_{journal_catgoray}_{timestamp}_TXN_{transaction_id}"
+    for transfer in transfers:
+        from_amount = getattr(transfer, "from_center", 0) or 0
+        if from_amount > 0:
+            journal_entry = {
                 "Status Code": "NEW",
                 "Ledger ID": LEDGER_ID,
                 "Effective Date of Transaction": ORACLE_EFFECTIVE_DATE,
@@ -265,41 +248,71 @@ def create_journal_entry_data(
                 "Currency Code": CURRENCY_CODE,
                 "Journal Entry Creation Date": time.strftime("%Y-%m-%d"),
                 "Actual Flag": "E",
-                "Entered Debit Amount": total_debit if entry_type == "reject" else "",
-                "Entered Credit Amount": total_debit if entry_type == "submit" else "",
+                "Entered Debit Amount": from_amount if entry_type == "submit" else "",
+                "Entered Credit Amount": from_amount if entry_type == "reject" else "",
                 "REFERENCE1 (Batch Name)": batch_name,
                 "REFERENCE2 (Batch Description)": batch_description,
                 "REFERENCE4 (Journal Entry Name)": journal_name,
                 "REFERENCE5 (Journal Entry Description)": journal_description,
-                "REFERENCE10 (Journal Entry Line Description)": "Offsetting credit line for balance transfer",
+                "REFERENCE10 (Journal Entry Line Description)": f"Debit transaction {transfer.transaction_id} transfer line {transfer.transfer_id}",
                 "Encumbrance Type ID": ENCUMBRANCE_TYPE_ID,
                 "Interface Group Identifier": group_id,
-                # Static segment values
-                "Segment1": "1",
-                "Segment2": "0138",
-                "Segment3": "1",
-                "Segment4": "00000000",
-                "Segment5": "6829999",
-                "Segment6": "412119997",
-                "Segment7": "00000",
-                "Segment8": "70113",
-                "Segment9": "013810010001",
-                "Segment10": "0000",
-                "Segment11": "000000000000",
-                "Segment12": "00000",
-                "Segment13": "00000",
-                "Segment14": "00000",
-                "Segment15": "00000",
-                "Segment16": "00000",
             }
-            
-            # Fill remaining segments (17-30) with empty values
-            for i in range(17, 31):
-                offsetting_entry[f"Segment{i}"] = ""
-            
-            offsetting_with_segments = offsetting_entry
+            print("fill_all")
+            segment_data = mapper.build_fbdi_row(
+                transaction_transfer=transfer,
+                base_row=journal_entry,
+                fill_all=True
+            )
+            sample_data.append(segment_data)
+
+    if total_debit > 0 and transfers:
         
-        sample_data.append(offsetting_with_segments)
+        # Static segment values for offsetting entry
+        offsetting_entry = {
+            "Status Code": "NEW",
+            "Ledger ID": LEDGER_ID,
+            "Effective Date of Transaction": ORACLE_EFFECTIVE_DATE,
+            "Journal Source": ORACLE_JOURNAL_SOURCE,
+            "Journal Category": journal_catgoray,
+            "Currency Code": CURRENCY_CODE,
+            "Journal Entry Creation Date": time.strftime("%Y-%m-%d"),
+            "Actual Flag": "E",
+            "Entered Debit Amount": total_debit if entry_type == "reject" else "",
+            "Entered Credit Amount": total_debit if entry_type == "submit" else "",
+            "REFERENCE1 (Batch Name)": batch_name,
+            "REFERENCE2 (Batch Description)": batch_description,
+            "REFERENCE4 (Journal Entry Name)": journal_name,
+            "REFERENCE5 (Journal Entry Description)": journal_description,
+            "REFERENCE10 (Journal Entry Line Description)": "Offsetting credit line for balance transfer",
+            "Encumbrance Type ID": ENCUMBRANCE_TYPE_ID,
+            "Interface Group Identifier": group_id,
+            # Static segment values
+            "Segment1": "1",
+            "Segment2": "0138",
+            "Segment3": "1",
+            "Segment4": "00000000",
+            "Segment5": "6829999",
+            "Segment6": "412119997",
+            "Segment7": "00000",
+            "Segment8": "70113",
+            "Segment9": "013810010001",
+            "Segment10": "0000",
+            "Segment11": "000000000000",
+            "Segment12": "00000",
+            "Segment13": "00000",
+            "Segment14": "00000",
+            "Segment15": "00000",
+            "Segment16": "00000",
+        }
+        
+        # Fill remaining segments (17-30) with empty values
+        for i in range(17, 31):
+            offsetting_entry[f"Segment{i}"] = ""
+        
+        offsetting_with_segments = offsetting_entry
+    
+    sample_data.append(offsetting_with_segments)
 
     return sample_data
 

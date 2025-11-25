@@ -741,6 +741,9 @@ class transcationtransferapprovel_reject(APIView):
                     target_user=OtherUser,
                 )
                 # Update pivot fund if final approval or rejection
+                trasncation = xx_BudgetTransfer.objects.get(
+                    transaction_id=transaction_id
+                )
                 
                 isFinal, Status = ApprovalManager.is_workflow_finished(trasncation)
                 if isFinal:
@@ -753,6 +756,7 @@ class transcationtransferapprovel_reject(APIView):
 
                         if Status == "approved" :
                             # Queue background task for Oracle upload
+                            print(f"Queuing budget upload task for transaction {transaction_id}")
                             upload_budget_to_oracle.delay(
                                 transaction_id=transaction_id,
                                 entry_type="Approve"
@@ -763,6 +767,7 @@ class transcationtransferapprovel_reject(APIView):
                                 "message": "Transaction approved successfully"
                         })
                         if Status == "rejected":
+                            print(f"Queuing journal upload task for transaction {transaction_id}")
                             upload_journal_to_oracle.delay(
                                     transaction_id=transaction_id,
                                     entry_type="reject"

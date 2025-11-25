@@ -130,6 +130,9 @@ def upload_budget_to_oracle(self, transaction_id,entry_type="submit"):
     logger.info(f"CELERY TASK STARTED: upload_budget_to_oracle")
     logger.info(f"Transaction ID: {transaction_id}")
     logger.info(f"=" * 80)
+    print("=" * 80)
+    print(f"CELERY TASK STARTED: upload_budget_to_oracle for transaction {transaction_id}")
+    print("=" * 80)
     
     try:
         logger.info(f"Starting Oracle upload for transaction {transaction_id}")
@@ -137,6 +140,7 @@ def upload_budget_to_oracle(self, transaction_id,entry_type="submit"):
         # Get the budget transfer
         budget_transfer = xx_BudgetTransfer.objects.get(transaction_id=transaction_id)
         logger.info(f"Budget transfer found: {budget_transfer}")
+        print(f"Budget transfer found: {budget_transfer}")
         
         
         
@@ -149,24 +153,28 @@ def upload_budget_to_oracle(self, transaction_id,entry_type="submit"):
                 "success": False,
                 "error": "No transfers found"
             }
-        budget_transfer.type="FAR"
         
         
         if budget_transfer.type=="FAR":
+            print(f"Starting Journal upload for transaction {transaction_id} before budget upload")
             upload_result,result_path =create_and_upload_journal(
                 transfers=transfers,
                 transaction_id=transaction_id,
                 entry_type="reject"
             )
+            print(f"Journal upload result for transaction {transaction_id}: {upload_result}")
             if not upload_result.get("success"):
+                print(f"error happened for  {transaction_id}")
                 logger.warning(f"Journal upload failed for transaction {transaction_id}: {upload_result.get('error')}")
                 error=upload_result.get('error','Unknown error')
                 return {
                     "success": False,
                     "error": error
                 }
+            
         
         logger.info(f"Journal upload succeeded for transaction {transaction_id}. Proceeding to budget upload.")
+        print(f"Journal upload succeeded for transaction {transaction_id}. Proceeding to budget upload.")
         upload_result, result_path = create_and_upload_budget(
         transfers=transfers,
         transaction_id=transaction_id,

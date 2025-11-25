@@ -12,7 +12,7 @@ from typing import Dict, Optional
 from dotenv import load_dotenv
 from django.utils import timezone
 from budget_management.models import xx_budget_integration_audit, xx_BudgetTransfer
-from test_upload_fbdi.budget_import_flow import submit_budget_import
+#from test_upload_fbdi.budget_import_flow import submit_budget_import
 
 # Import notification functions from centralized location - REMOVED
 # from __NOTIFICATIONS_SETUP__.code.task_notifications import (
@@ -383,6 +383,10 @@ def run_complete_workflow(file_path: str, Groupid: Optional[int] = None, transac
         transaction_obj = None
         if transaction_id:
             transaction_obj = xx_BudgetTransfer.objects.get(transaction_id=transaction_id)
+
+            print("*" * 60  )
+            print(f"\nStarting complete workflow for Budget entry for transaction ID: {transaction_id}, entry type: {entry_type}")
+            print("*" * 60  )
         
         # Step 1: Upload to UCM
         print("\n" + "="*60)
@@ -396,7 +400,7 @@ def run_complete_workflow(file_path: str, Groupid: Optional[int] = None, transac
             step_name="Journal Upload to UCM",
             step_number=1,
             status="In Progress",
-            message=f"Uploading file {file_path} to UCM",
+            message=f"Uploading file to UCM",
             Action_Type=entry_type
         )
 
@@ -469,97 +473,58 @@ def run_complete_workflow(file_path: str, Groupid: Optional[int] = None, transac
         
        
         # Step 3: Submit budget Import
-        ORACLE_BUDUGET_NAME = os.getenv("ORACLE_BUDUGET_NAME")
+        budget=xx_BudgetTransfer.objects.get(transaction_id=transaction_id)
+
+        ORACLE_BUDUGET_NAME=os.getenv("ORACLE_BUDUGET_NAME")
+
+        Budget_catgorays= ORACLE_BUDUGET_NAME.split(",")
+
+        if budget.control_budget == "سيولة":
+            Budget_catgoray = Budget_catgorays[0]
+        elif budget.control_budget == "تكاليف":
+            Budget_catgoray = Budget_catgorays[1]
+        budget_name = Budget_catgoray
         
-        # Handle None or empty budget names
-        if ORACLE_BUDUGET_NAME:
-            budget_names = ORACLE_BUDUGET_NAME.split(",")
-        else:
-            budget_names = ["MIC_HQ_MONTHLY"]  # Default budget name
+
       
-        for budget_name in budget_names:
-            print(f"\nProcessing Budget Import for: {budget_name}")
-            audit_budget_import = xx_budget_integration_audit.objects.create(
+        
+        print(f"\nProcessing Budget Import for: {budget_name}")
+        audit_budget_import = xx_budget_integration_audit.objects.create(
                 transaction_id=transaction_obj,
-                step_name=f"Budget Import Submission for {budget_name}",
+                step_name=f"Budget Import Submission for {transaction_id}",
                 step_number=3,
                 status="In Progress",
                 message=f"Submitting Budget Import for Group ID {Groupid}",
                 group_id=Groupid,
                 Action_Type=entry_type
             )
-            import_result = submit_budget_import(document_id, Groupid=Groupid, BUDGET_NAME=budget_name,transaction_id=transaction_id)
+        import_result = submit_budget_import(document_id, Groupid=Groupid, BUDGET_NAME=budget_name,transaction_id=transaction_id)
 
-            audit_budget_import.request_id = import_result.get("request_id")
-            audit_budget_import.save()
-            workflow_results["steps"].append({"step": "journal_import", "result": import_result})
+        audit_budget_import.request_id = import_result.get("request_id")
+        audit_budget_import.save()
+        workflow_results["steps"].append({"step": "journal_import", "result": import_result})
             
-            if not import_result["success"]:
+        if not import_result["success"]:
                 workflow_results["error"] = "Journal import submission failed"
                 return workflow_results
             
             # Wait for journal import to complete
-            import_status = wait_for_job_completion(import_result["request_id"], "Journal Import")
-            workflow_results["steps"].append({"step": "journal_import_status", "result": import_status})
+        import_status = wait_for_job_completion(import_result["request_id"], "Journal Import")
+        workflow_results["steps"].append({"step": "journal_import_status", "result": import_status})
         
-            if not import_status["success"]:
+        if not import_status["success"]:
                 workflow_results["error"] = f"Budget import {import_status['state']}"
                 audit_budget_import.status = "Failed"
                 audit_budget_import.message = f"Budget import {import_status['state']}"
                 audit_budget_import.completed_at = timezone.now()
                 audit_budget_import.save()
                 return workflow_results
-            audit_budget_import.status = "Success"
-            audit_budget_import.message = "Budget Import completed successfully"
-            audit_budget_import.completed_at = timezone.now()
-            audit_budget_import.save()
+        audit_budget_import.status = "Success"
+        audit_budget_import.message = "Budget Import completed successfully"
+        audit_budget_import.completed_at = timezone.now()
+        audit_budget_import.save()
         
-        # Step 4: Submit AutoPost
-        #audit_autopost = xx_budget_integration_audit.objects.create(
-        #    transaction_id=transaction_obj,
-        #    step_name="Automatic Posting Submission",
-        #    step_number=4,
-        #    status="In Progress",
-        #    message="Submitting Automatic Posting",
-        #    Action_Type=entry_type
-        #)
-        #post_result = submit_automatic_posting()
-        #audit_autopost.request_id = post_result.get("request_id")
-        #audit_autopost.save()
-        #workflow_results["steps"].append({"step": "autopost", "result": post_result})
         
-        #if not post_result["success"]:
-        #    workflow_results["error"] = "AutoPost submission failed"
-        #    workflow_results["warning"] = "Journals imported but not posted"
-        #    return workflow_results
-        
-        ## Wait for autopost to complete
-        #post_status = wait_for_job_completion(post_result["request_id"], "AutoPost")
-        #workflow_results["steps"].append({"step": "autopost_status", "result": post_status})
-        
-        #if not post_status["success"]:
-        #    workflow_results["error"] = f"AutoPost {post_status['state']}"
-        #    workflow_results["warning"] = "Journals imported but posting failed"
-        #    audit_autopost.status = "Failed"
-        #    audit_autopost.message = f"AutoPost {post_status['state']}"
-        #    audit_autopost.completed_at = timezone.now()
-        #    audit_autopost.save()
-        #    return workflow_results
-        #audit_autopost.status = "Success"
-        #audit_autopost.message = "Automatic Posting completed successfully"
-        #audit_autopost.completed_at = timezone.now()
-        #audit_autopost.save()
-        
-        # All steps completed successfully
-        # overall_process = xx_budget_integration_audit.objects.create(
-        #     transaction_id=transaction_obj,
-        #     step_name="Complete Journal Import Workflow",
-        #     step_number=5,
-        #     status="Success",
-        #     message="All steps completed successfully",
-        #     completed_at=timezone.now(),
-        #     Action_Type=entry_type
-        # )
         workflow_results["success"] = True
         workflow_results["message"] = "All steps completed successfully"
         print(f"\n✓✓✓ ALL STEPS COMPLETED SUCCESSFULLY! ✓✓✓")
