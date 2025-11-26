@@ -1,6 +1,6 @@
 from budget_management.models import xx_BudgetTransfer
 from transaction.models import xx_TransactionTransfer
-from account_and_entitys.models import XX_Segment_Funds, XX_TransactionSegment, XX_Segment
+from account_and_entitys.models import XX_Segment_Funds, XX_TransactionSegment, XX_Segment, XX_gfs_Mamping
 from rest_framework.views import APIView
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.parsers import MultiPartParser
@@ -135,6 +135,16 @@ class SegmentTransferAggregationView(APIView):
         for seg in all_segments:
             segment_aliases[seg['code']] = seg['alias']
         
+        # Step 1.6: Get all GFS mapping codes for this segment type
+        # Mapping is based on To_Value matching the segment code
+        segment_mappings = {}
+        all_mappings = XX_gfs_Mamping.objects.filter(
+            is_active=True
+        ).values('To_Value', 'Target_value')
+        for mapping in all_mappings:
+            to_value = mapping['To_Value']
+            segment_mappings[to_value] = mapping['Target_value']
+        
         # Step 2: Aggregate transfer data by segment code
         aggregation = {}
         
@@ -143,8 +153,11 @@ class SegmentTransferAggregationView(APIView):
             base = {
                 "segment_code": code,
                 "segment_alias": alias,
+                "mapping_code": segment_mappings.get(code),  # GFS mapping for this segment
                 "total_from_center": Decimal('0'),
                 "total_to_center": Decimal('0'),
+                "total_additional_fund": Decimal('0'),  # AFR transfers
+                "total_decrease_fund": Decimal('0'),    # DFR transfers
                 "transfers_as_source": 0,
                 "transfers_as_destination": 0,
                 "net_change": Decimal('0'),
@@ -172,6 +185,11 @@ class SegmentTransferAggregationView(APIView):
             from_center = transfer.from_center or Decimal('0')
             to_center = transfer.to_center or Decimal('0')
             
+            # Get transaction type code (AFR = Additional Fund, DFR = Decrease Fund)
+            transaction_code = getattr(transfer.transaction, 'code', '') or ''
+            is_afr = transaction_code[:3].upper() == 'AFR'  # Additional Fund Request
+            is_dfr = transaction_code[:3].upper() == 'DFR'  # Decrease Fund Request
+            
             # Process FROM segment (source of funds)
             if ts.from_segment_value:
                 from_code = ts.from_segment_value.code
@@ -184,6 +202,12 @@ class SegmentTransferAggregationView(APIView):
                     aggregation[from_code]["total_from_center"] += from_center
                     aggregation[from_code]["transfers_as_source"] += 1
                     aggregation[from_code]["transfer_ids_as_source"].append(transfer.transfer_id)
+                    
+                    # Track AFR and DFR separately for source
+                    if is_afr:
+                        aggregation[from_code]["total_additional_fund"] += from_center
+                    elif is_dfr:
+                        aggregation[from_code]["total_decrease_fund"] += from_center
             
             # Process TO segment (destination of funds)
             if ts.to_segment_value:
@@ -197,6 +221,12 @@ class SegmentTransferAggregationView(APIView):
                     aggregation[to_code]["total_to_center"] += to_center
                     aggregation[to_code]["transfers_as_destination"] += 1
                     aggregation[to_code]["transfer_ids_as_destination"].append(transfer.transfer_id)
+                    
+                    # Track AFR and DFR separately for destination
+                    if is_afr:
+                        aggregation[to_code]["total_additional_fund"] += to_center
+                    elif is_dfr:
+                        aggregation[to_code]["total_decrease_fund"] += to_center
         
         # Calculate net change for each segment and convert to float
         for code, data in aggregation.items():
@@ -204,23 +234,45 @@ class SegmentTransferAggregationView(APIView):
             data["net_change"] = float(data["total_to_center"] - data["total_from_center"])
             data["total_from_center"] = float(data["total_from_center"])
             data["total_to_center"] = float(data["total_to_center"])
+            data["total_additional_fund"] = float(data["total_additional_fund"])
+            data["total_decrease_fund"] = float(data["total_decrease_fund"])
+            
+            # Calculate Exchange Rate = (actual / total_budget) * 100 as percentage
+            total_budget = data.get("total_budget_sum", 0)
+            actual = data.get("actual_sum", 0)
+            if total_budget and total_budget != 0:
+                data["exchange_rate"] = round((actual / total_budget) * 100, 2)
+            else:
+                data["exchange_rate"] = 0.0
         
         # Step 3: Add segments from XX_Segment_Funds that are not in any transfers
         for segment_code, funds_data in funds_by_segment.items():
             if segment_code not in aggregation:
                 # This segment exists in funds but has no transfers
                 # Look up the alias from XX_Segment
+                # Calculate Exchange Rate for this segment
+                total_budget = funds_data.get("total_budget_sum", 0)
+                actual = funds_data.get("actual_sum", 0)
+                if total_budget and total_budget != 0:
+                    exchange_rate = round((actual / total_budget) * 100, 2)
+                else:
+                    exchange_rate = 0.0
+                
                 aggregation[segment_code] = {
                     "segment_code": segment_code,
                     "segment_alias": segment_aliases.get(segment_code),  # Get alias from XX_Segment lookup
+                    "mapping_code": segment_mappings.get(segment_code),  # GFS mapping for this segment
                     "total_from_center": 0.0,
                     "total_to_center": 0.0,
+                    "total_additional_fund": 0.0,
+                    "total_decrease_fund": 0.0,
                     "transfers_as_source": 0,
                     "transfers_as_destination": 0,
                     "net_change": 0.0,
                     "transfer_ids_as_source": [],
                     "transfer_ids_as_destination": [],
                     "has_transfers": False,
+                    "exchange_rate": exchange_rate,
                     **funds_data
                 }
             else:
@@ -238,6 +290,8 @@ class SegmentTransferAggregationView(APIView):
         # Calculate grand totals (before pagination)
         grand_total_from = sum(item["total_from_center"] for item in aggregation_list)
         grand_total_to = sum(item["total_to_center"] for item in aggregation_list)
+        grand_total_additional_fund = sum(item["total_additional_fund"] for item in aggregation_list)
+        grand_total_decrease_fund = sum(item["total_decrease_fund"] for item in aggregation_list)
         
         # Count segments with and without transfers
         segments_with_transfers = sum(1 for item in aggregation_list if item["has_transfers"])
@@ -269,9 +323,13 @@ class SegmentTransferAggregationView(APIView):
                 "total_segments_in_funds": len(funds_by_segment),
                 "grand_total_from_center": grand_total_from,
                 "grand_total_to_center": grand_total_to,
+                "grand_total_additional_fund": grand_total_additional_fund,  # AFR total
+                "grand_total_decrease_fund": grand_total_decrease_fund,      # DFR total
                 "grand_total_net": grand_total_to - grand_total_from,
                 "grand_total_budget": sum(item["total_budget_sum"] for item in aggregation_list),
                 "grand_funds_available": sum(item["funds_available_sum"] for item in aggregation_list),
+                "grand_actual": sum(item["actual_sum"] for item in aggregation_list),
+                "grand_exchange_rate": round((sum(item["actual_sum"] for item in aggregation_list) / sum(item["total_budget_sum"] for item in aggregation_list) * 100), 2) if sum(item["total_budget_sum"] for item in aggregation_list) != 0 else 0.0,
             },
             "segments": paginated_segments,
         }
