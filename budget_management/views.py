@@ -109,7 +109,7 @@ class CreateBudgetTransferView(APIView):
         transfer_type = request.data.get("type").upper()
         transfer_control_budget = request.data.get("budget_control", "")
 
-        if transfer_type in ["FAR", "AFR", "FAD", "DFA"]:
+        if transfer_type in ["FAR", "AFR", "FAD", "DFR"]:
             prefix = f"{transfer_type}-"
         else:
 
@@ -177,6 +177,7 @@ class ListBudgetTransferView(APIView):
         sdate = request.query_params.get("start_date")
         edate = request.query_params.get("end_date")
         code = request.query_params.get("code", None)
+        print( f"code value: {code} ({type(code)})")
 
         transfers = xx_BudgetTransfer.objects.all()
         # Apply user restriction if not admin
