@@ -1118,7 +1118,7 @@ class transcationtransferSubmit(APIView):
                 )
                 code = xx_BudgetTransfer.objects.get(transaction_id=transaction_id).code
                 print(f"Transfers found: {transfers.count()}")
-                if len(transfers) < 2 and code[0:3] != "AFR":
+                if len(transfers) < 2 and code[0:3] == "FAR":
                     return Response(
                         {
                             "error": "Not enough transfers",

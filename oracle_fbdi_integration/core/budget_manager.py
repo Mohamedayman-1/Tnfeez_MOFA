@@ -195,8 +195,8 @@ class BudgetTemplateManager:
 def create_budget_entry_data(
     transfers,
     transaction_id: int,
-    source_budget_type: str,
-    source_budget_name: str,
+    source_budget_type:Optional[str] = None,
+    source_budget_name: Optional[str] = None,
     period_name: str = "1-25",
     currency_code: str = "AED",
 ) -> List[Dict[str, Any]]:

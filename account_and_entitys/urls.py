@@ -51,6 +51,8 @@ from .oracle.view import (
     get_segments_fund
 )
 
+from .report.view import  SegmentTransferAggregationView
+
 # Import Phase 3 views
 from .phase3_views import (
     # Envelope Views
@@ -298,16 +300,20 @@ urlpatterns = [
 
 
        #oracle apis for data fetch
-       path("segments/load_Segments_oracle/", Download_segment_values_from_oracle.as_view(), name="segment-create"),
-       path("segments/load_Segments_oracle/Funds/", Download_segment_Funds.as_view(), name="segment-create"),
-       path("segments/get_segment_fund/", get_segment_fund.as_view(), name="segment-create"),
-       path(
+    path("segments/load_Segments_oracle/", Download_segment_values_from_oracle.as_view(), name="segment-create"),
+    path("segments/load_Segments_oracle/Funds/", Download_segment_Funds.as_view(), name="segment-create"),
+    path("segments/get_segment_fund/", get_segment_fund.as_view(), name="segment-create"),
+    path(
         "segments/get_segments_fund/",
         get_segments_fund.as_view(),
         name="segment-create",
-       )
+       ),
+    path("segment_transfer_aggregation/", SegmentTransferAggregationView.as_view(), name="segment-transfer-aggregation"),
+ 
   
 
 
 
 ]
+
+  

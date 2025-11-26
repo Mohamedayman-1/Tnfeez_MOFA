@@ -11,6 +11,8 @@ import requests
 from typing import Dict, Optional
 from dotenv import load_dotenv
 from django.utils import timezone
+from account_and_entitys.models import XX_Segment_Funds
+from account_and_entitys.oracle.oracle_balance_report_manager import OracleBalanceReportManager
 from budget_management.models import xx_budget_integration_audit, xx_BudgetTransfer
 #from test_upload_fbdi.budget_import_flow import submit_budget_import
 
@@ -528,6 +530,28 @@ def run_complete_workflow(file_path: str, Groupid: Optional[int] = None, transac
         workflow_results["success"] = True
         workflow_results["message"] = "All steps completed successfully"
         print(f"\n✓✓✓ ALL STEPS COMPLETED SUCCESSFULLY! ✓✓✓")
+
+        print("Refreshing fund values...")
+        period_name = "1-25"
+       
+        oracle_manager=OracleBalanceReportManager()
+        load_dotenv()
+
+        XX_Segment_Funds.objects.all().delete()
+
+        control_budget_names = ["MOFA_CASH", "MOFA_COST_2"]
+        results = []
+        total_success = 0
+        total_failed = 0
+        
+        for control_budget_name in control_budget_names:
+            result = oracle_manager.download_segments_funds(control_budget_name=control_budget_name, period_name=period_name)
+            if result['success']:
+                print("Refreshing the Fund data is Success for control budget:",control_budget_name)
+            else:
+                print("Refreshing the Fund data is Failed for control budget:",control_budget_name)
+
+
         
         return workflow_results
         
