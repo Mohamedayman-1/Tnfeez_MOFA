@@ -717,6 +717,7 @@ class TransactionTransferListView(APIView):
                 status = "waiting for approval"
 
         transfers = xx_TransactionTransfer.objects.filter(transaction=transaction_id)
+        budget=xx_BudgetTransfer.objects.get(transaction_id=transaction_id)
         # Use TransactionTransferDynamicSerializer for full segment details
         serializer = TransactionTransferDynamicSerializer(transfers, many=True)
 
@@ -919,15 +920,15 @@ class TransactionTransferListView(APIView):
                         f"اجمالى سيولة البند (السيولة المتاحة للبند المنقول إليه + القيمة المنقولة) اكبر من اجمالى موازنة تكاليف البند المنقول الية  برجاء إعادة التوزيع {float(tot_budget):,.1f} "
                     )
             
-
-            if Total_from_Value > Total_to_Value:
-                 validation_errors.append(
-                    "  برجاء التحقق من قيمة ارصدت التوزيع حيث ان مجموع المنقول منه اكبر من مجموع المنقول اليه " 
+            if budget.type=='FAR':
+                if Total_from_Value > Total_to_Value:
+                    validation_errors.append(
+                        "  برجاء التحقق من قيمة ارصدت التوزيع حيث ان مجموع المنقول منه اكبر من مجموع المنقول اليه " 
+                        )
+                elif Total_from_Value < Total_to_Value:
+                    validation_errors.append(
+                        "برجاء التحقق من قيمة ارصدت التوزيع حيث ان مجموع المنقول اليه اكبر من مجموع المنقول منه " 
                     )
-            elif Total_from_Value < Total_to_Value:
-                validation_errors.append(
-                    "برجاء التحقق من قيمة ارصدت التوزيع حيث ان مجموع المنقول اليه اكبر من مجموع المنقول منه " 
-                )
 
             # Add validation results to transfer data
             transfer_response = transfer_data.copy()

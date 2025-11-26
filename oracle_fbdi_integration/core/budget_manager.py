@@ -235,15 +235,18 @@ def create_budget_entry_data(
 
     budget_entries = []
     line_number = 1
+  
     ORACLE_BUDUGET_NAME=os.getenv("ORACLE_BUDUGET_NAME")
+    print(ORACLE_BUDUGET_NAME)
     Budget_catgorays= ORACLE_BUDUGET_NAME.split(",")
     if budget.control_budget == "سيولة":
         Budget_catgoray = Budget_catgorays[0]
     elif budget.control_budget == "تكاليف":
         Budget_catgoray = Budget_catgorays[1]
     source_budget_name = Budget_catgoray
+    print("Source budget name:",source_budget_name)
     budget_name = f"{source_budget_name}_{transaction_id}"
-
+    print("Budget Name:",budget_name)
     print(f"Creating budget entries for transaction {transaction_id} with budget name {budget_name} and source budget {Budget_catgoray}")
     for transfer in transfers:
         from_amount = getattr(transfer, 'from_center', 0) or 0
