@@ -78,7 +78,9 @@ class xx_BudgetTransfer(models.Model):
     control_budget = models.CharField(
         max_length=255, null=True, blank=True
     )  # Changed from EncryptedCharField
-    
+    transfer_type= models.CharField(
+        max_length=50, null=True, blank=True
+    )  # Changed from EncryptedCharField
     class Meta:
         db_table = "XX_BUDGET_TRANSFER_XX"
 

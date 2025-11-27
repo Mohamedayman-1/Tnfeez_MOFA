@@ -62,7 +62,7 @@ class GFSMappingsUploadView(APIView):
         normalized_cols = {
             str(col).strip().lower(): col for col in df.columns
         }
-        required_keys = ["to value", "from value", "target value"]
+        required_keys = ["to value", "from value", "target value" , "target alias"]
         missing = [key for key in required_keys if key not in normalized_cols]
 
         if missing:
@@ -79,6 +79,7 @@ class GFSMappingsUploadView(APIView):
             normalized_cols["to value"]: "to value",
             normalized_cols["from value"]: "from value",
             normalized_cols["target value"]: "target value",
+            normalized_cols["target alias"]: "target alias",
         }
         df = df.rename(columns=rename_map)
 
@@ -95,6 +96,7 @@ class GFSMappingsUploadView(APIView):
                 to_value = _normalize_cell(row.get("to value"))
                 from_value = _normalize_cell(row.get("from value"))
                 target_value = _normalize_cell(row.get("target value"))
+                target_alias = _normalize_cell(row.get("target alias"))
 
                 # Require To_Value and Target_value to satisfy unique constraint
                 if not to_value or not target_value:
@@ -107,6 +109,7 @@ class GFSMappingsUploadView(APIView):
                         Target_value=target_value,
                         defaults={
                             "From_value": from_value,
+                            "Target_alias": target_alias,
                             "is_active": True,
                         },
                     )
@@ -121,6 +124,7 @@ class GFSMappingsUploadView(APIView):
                             "to_value": to_value,
                             "from_value": from_value,
                             "target_value": target_value,
+                            "target_alias": target_alias,
                             "error": str(exc),
                         }
                     )
