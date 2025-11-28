@@ -1669,6 +1669,7 @@ class XX_gfs_Mamping(models.Model):
     From_value = models.CharField(max_length=50)
     Target_value = models.CharField(max_length=50)
     Target_alias=models.CharField(max_length=100,null=True,blank=True)
+    Same=models.CharField(max_length=50, default=False)
 
     is_active = models.BooleanField(default=True)
 

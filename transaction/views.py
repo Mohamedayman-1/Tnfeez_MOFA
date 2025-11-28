@@ -11,6 +11,7 @@ from account_and_entitys.models import (
     XX_PivotFund,
     XX_ACCOUNT_ENTITY_LIMIT,
     XX_Segment_Funds,
+    XX_gfs_Mamping,
 )
 from budget_management.models import xx_BudgetTransfer
 from .serializers import (
@@ -941,6 +942,49 @@ class TransactionTransferListView(APIView):
             transfer_response["control_budgets_count"] = len(control_budget_records)
 
             response_data.append(transfer_response)
+
+        # ========== GFS "Same" Value Validation ==========
+        # Only apply when: budget.type == 'FAR' and budget.transfer_type == 'خارجية'
+        # Check if at least one transfer has a different "Same" value than another
+        # (i.e., at least one YES and one NO among all transfers)
+        
+        # First check if this is a FAR type transfer with خارجية transfer_type
+        budget_transfer_type = budget.transfer_type or ""
+        if budget.type == 'FAR' and budget_transfer_type == 'خارجية':
+            same_values_found = set()
+            gfs_validation_error = None
+            
+            for transfer_data in response_data:
+                # Get segment 11 code from the transfer's segments
+                segments = transfer_data.get("segments", {})
+                segment_11_code = None
+                
+                # Look for segment type 11
+                for seg_id, seg_info in segments.items():
+                    if str(seg_id) == "11":
+                        # Get the code (from_code or to_code or code)
+                        segment_11_code = seg_info.get('from_code') or seg_info.get('to_code') or seg_info.get('code')
+                        break
+                
+                if segment_11_code:
+                    # Look up in XX_gfs_Mamping by From_value
+                    gfs_mapping = XX_gfs_Mamping.objects.filter(From_value=segment_11_code).first()
+                    if gfs_mapping and gfs_mapping.Same:
+                        same_values_found.add(gfs_mapping.Same.upper())
+            
+            # Check if we have both YES and NO (at least one different)
+            has_yes = "YES" in same_values_found
+            has_no = "NO" in same_values_found
+            
+            if same_values_found and not (has_yes and has_no):
+                # All transfers have the same "Same" value - add validation error
+                gfs_validation_error = "لا يمكن انشاء جميع التحويلات من نفس المصدر"
+                
+                # Add this error to all transfers
+                for transfer_data in response_data:
+                    if gfs_validation_error not in transfer_data.get("validation_errors", []):
+                        transfer_data["validation_errors"].append(gfs_validation_error)
+                        transfer_data["is_valid"] = False
 
         # Also add transaction-wide validation summary
 

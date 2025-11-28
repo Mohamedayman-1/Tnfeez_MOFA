@@ -26,6 +26,7 @@ from .models import (
     EnvelopeManager,
     XX_Segment,
     XX_SegmentType,
+    XX_gfs_Mamping,
 )
 from .serializers import (
     AccountSerializer,
@@ -420,6 +421,9 @@ class SegmentListView(APIView):
         * 'leaf' or 'children': Only leaf segments (segments with no children)
         * 'exclude_leaf': All segments except leaf segments (only parents)
         * 'exclude_root': All segments except root segments (only non-root)
+    - same_filter_code: Optional. A segment code to look up in XX_gfs_Mamping.
+        If the mapping has Same='yes', only return segments with Same='yes'.
+        If the mapping has Same='no', only return segments with Same='no'.
     """
 
     permission_classes = [IsAuthenticated]
@@ -429,6 +433,7 @@ class SegmentListView(APIView):
         search_query = request.query_params.get("search", None)
         filter_type = request.query_params.get("filter", "all").lower()
         segment_type_param = request.query_params.get("segment_type", None)
+        same_filter_code = request.query_params.get("same_filter_code", None)
 
         # Validate segment_type parameter
         if not segment_type_param:
@@ -526,6 +531,30 @@ class SegmentListView(APIView):
                 Q(code__icontains=search_query) | 
                 Q(alias__icontains=search_query)
             )
+        
+        # Apply same_filter based on same_filter_code lookup in XX_gfs_Mamping
+        same_filter_value = None
+        if same_filter_code:
+            # Look up the Same value for the provided segment code in GFS mapping (using From_value)
+            gfs_mapping = XX_gfs_Mamping.objects.filter(
+                From_value=same_filter_code,
+                is_active=True
+            ).first()
+            
+            if gfs_mapping is not None and gfs_mapping.Same:
+                # Same is a CharField with values like "YES" or "NO"
+                same_filter_value = gfs_mapping.Same.strip().upper()
+                
+                # Get all OTHER segment codes that have the same 'Same' value (using From_value)
+                # Exclude the original same_filter_code - return only other codes
+                matching_mappings = XX_gfs_Mamping.objects.filter(
+                    is_active=True,
+                    Same__iexact=same_filter_value  # Case-insensitive match (YES/NO)
+                ).values_list('From_value', flat=True)
+                print(f"same_filter_value={same_filter_value}, matching count={len(list(matching_mappings))}")
+                
+                # Filter segments to only include those with matching Same value (excluding original)
+                segments = segments.filter(code__in=list(matching_mappings))
 
         # Use the new SegmentValueListSerializer
         serializer = SegmentValueListSerializer(segments, many=True)
@@ -537,6 +566,8 @@ class SegmentListView(APIView):
                 "segment_type": segment_type_obj.segment_name,
                 "segment_type_id": segment_type_obj.segment_id,
                 "filter_applied": filter_type,
+                "same_filter_code": same_filter_code,
+                "same_filter_value": same_filter_value,
                 "total_count": segments.count()
             }
         )
