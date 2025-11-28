@@ -674,7 +674,7 @@ class TransactionTransferListView(APIView):
                 },
                 status=rest_framework.status.HTTP_400_BAD_REQUEST,
             )
-
+        transaction_object=None
         try:
             transaction_object = xx_BudgetTransfer.objects.get(
                 transaction_id=transaction_id
@@ -1021,6 +1021,11 @@ class TransactionTransferListView(APIView):
                     "balanced": True,
                     "status": status,
                     "period": transaction_object.transaction_date + str(-25),
+                    "code":budget.code,
+                    "request_date":budget.request_date,
+                    "control_budget":budget.control_budget,
+                    "notes":budget.notes,
+
                 }
             else:
                 summary = {
@@ -1031,6 +1036,11 @@ class TransactionTransferListView(APIView):
                     "balanced": total_from_center == total_to_center,
                     "status": status,
                     "period": transaction_object.transaction_date + str(-25),
+                    "code":transaction_object.code,
+                    "request_date":transaction_object.request_date,
+                    "control_budget":transaction_object.control_budget,
+                    "notes":transaction_object.notes,
+
                 }
 
             status = {"status": status}
@@ -1046,6 +1056,12 @@ class TransactionTransferListView(APIView):
                 "balanced": True,
                 "status": status,
                 "period": transaction_object.transaction_date + str(-25),
+                "code":transaction_object.code,
+                "request_date":transaction_object.request_date,
+                "control_budget":transaction_object.control_budget,
+                "notes":transaction_object.notes,
+
+                
             }
             status = {"status": status}
             return Response(
