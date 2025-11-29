@@ -654,14 +654,15 @@ class TransactionTransferListView(APIView):
 
         print(f"🔍 MOFA_COST_2 Query filters: {filters}")
         values = XX_Segment_Funds.objects.filter(**filters)
-        Fund_avaiable = 0.0
+        Fund_avaiable = None
+        Total_budget = None
         for Funds in values:
             if Funds.CONTROL_BUDGET_NAME=="MOFA_CASH":
               Fund_avaiable=Funds.FUNDS_AVAILABLE_PTD 
             elif Funds.CONTROL_BUDGET_NAME=="MOFA_COST_2":
                 Total_budget=Funds.TOTAL_BUDGET     
      
-        return Fund_avaiable ,Total_budget
+        return Fund_avaiable, Total_budget
 
     def get(self, request):
         transaction_id = request.query_params.get("transaction")
@@ -920,16 +921,6 @@ class TransactionTransferListView(APIView):
                     validation_errors.append(
                         f"اجمالى سيولة البند (السيولة المتاحة للبند المنقول إليه + القيمة المنقولة) اكبر من اجمالى موازنة تكاليف البند المنقول الية  برجاء إعادة التوزيع {float(tot_budget):,.1f} "
                     )
-            
-            if budget.type=='FAR':
-                if Total_from_Value > Total_to_Value:
-                    validation_errors.append(
-                        "  برجاء التحقق من قيمة ارصدت التوزيع حيث ان مجموع المنقول منه اكبر من مجموع المنقول اليه " 
-                        )
-                elif Total_from_Value < Total_to_Value:
-                    validation_errors.append(
-                        "برجاء التحقق من قيمة ارصدت التوزيع حيث ان مجموع المنقول اليه اكبر من مجموع المنقول منه " 
-                    )
 
             # Add validation results to transfer data
             transfer_response = transfer_data.copy()
@@ -942,6 +933,22 @@ class TransactionTransferListView(APIView):
             transfer_response["control_budgets_count"] = len(control_budget_records)
 
             response_data.append(transfer_response)
+
+        # ========== FAR Balance Validation ==========
+        # Only apply when: budget.type == 'FAR' and there are at least 2 transfers
+        # Check if total from equals total to
+        if budget.type == 'FAR' and len(response_data) >= 2:
+            if Total_from_Value != Total_to_Value:
+                if Total_from_Value > Total_to_Value:
+                    far_balance_error = "برجاء التحقق من قيمة ارصدت التوزيع حيث ان مجموع المنقول منه اكبر من مجموع المنقول اليه"
+                else:
+                    far_balance_error = "برجاء التحقق من قيمة ارصدت التوزيع حيث ان مجموع المنقول اليه اكبر من مجموع المنقول منه"
+                
+                # Add this error to all transfers
+                for transfer_data in response_data:
+                    if far_balance_error not in transfer_data.get("validation_errors", []):
+                        transfer_data["validation_errors"].append(far_balance_error)
+                        transfer_data["is_valid"] = False
 
         # ========== GFS "Same" Value Validation ==========
         # Only apply when: budget.type == 'FAR' and budget.transfer_type == 'خارجية'
@@ -1006,13 +1013,16 @@ class TransactionTransferListView(APIView):
                 for value in to_center_values
             )
 
-            if total_from_center == total_to_center:
+            # Only update amount if balanced AND there are at least 2 transfers
+            # (single transfer can't be balanced since it only has from OR to, not both)
+            transfer_count = all_related_transfers.count()
+            if transfer_count >= 2 and total_from_center == total_to_center:
                 transaction_object.amount = total_from_center
                 xx_BudgetTransfer.objects.filter(pk=transaction_id).update(
                     amount=total_from_center
                 )
 
-            if transaction_object.code[0:3] == "AFR":
+            if transaction_object.code[0:3] == "AFR" or transaction_object.code[0:3] == "DFR":
                 summary = {
                     "transaction_id": transaction_id,
                     "total_transfers": len(response_data),
@@ -1025,6 +1035,7 @@ class TransactionTransferListView(APIView):
                     "request_date":budget.request_date,
                     "control_budget":budget.control_budget,
                     "notes":budget.notes,
+                    "transfer_type":budget.transfer_type,
 
                 }
             else:
@@ -1033,13 +1044,14 @@ class TransactionTransferListView(APIView):
                     "total_transfers": len(response_data),
                     "total_from": total_from_center,
                     "total_to": total_to_center,
-                    "balanced": total_from_center == total_to_center,
+                    "balanced": transfer_count >= 2 and total_from_center == total_to_center,
                     "status": status,
                     "period": transaction_object.transaction_date + str(-25),
                     "code":transaction_object.code,
                     "request_date":transaction_object.request_date,
                     "control_budget":transaction_object.control_budget,
                     "notes":transaction_object.notes,
+                    "transfer_type":transaction_object.transfer_type,
 
                 }
 
@@ -1060,7 +1072,7 @@ class TransactionTransferListView(APIView):
                 "request_date":transaction_object.request_date,
                 "control_budget":transaction_object.control_budget,
                 "notes":transaction_object.notes,
-
+                "transfer_type":transaction_object.transfer_type,
                 
             }
             status = {"status": status}
