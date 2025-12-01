@@ -8,6 +8,7 @@ from .views import (
     transcationtransferSubmit,
     transcationtransfer_Reopen,
     TransactionTransferExcelUploadView,
+    TransactionTransferExcelTemplateView,
     # BudgetQuestionAnswerView,
 )
 
@@ -22,7 +23,8 @@ urlpatterns = [
     # Submit and reopen endpoints
     path("submit/", transcationtransferSubmit.as_view(), name="transfer-submit"),
     path("reopen/", transcationtransfer_Reopen.as_view(), name="transfer-reopen"),
-    # Excel upload endpoint
+    # Excel template and upload endpoints
+    path("excel-template/", TransactionTransferExcelTemplateView.as_view(), name="transfer-excel-template"),
     path("excel-upload/",TransactionTransferExcelUploadView.as_view(),name="transfer-excel-upload",),
     # Budget Q&A endpoint
     #path("budget-qa/",BudgetQuestionAnswerView.as_view(),name="budget-question-answer",),

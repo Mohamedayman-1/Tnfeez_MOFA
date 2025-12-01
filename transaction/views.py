@@ -1347,21 +1347,277 @@ class transcationtransfer_Reopen(APIView):
             )
 
 
+class TransactionTransferExcelTemplateView(APIView):
+    """
+    Download Excel template for transaction transfers based on required segments.
+    
+    The template includes:
+    - Column headers using segment aliases (or segment names if no alias)
+    - from_center and to_center columns
+    - reason column (optional)
+    
+    GET /api/transfers/excel-template/
+    Returns: JSON with download_url to the template file
+    """
+    permission_classes = [IsAuthenticated]
+    
+    def get(self, request):
+        try:
+            from account_and_entitys.managers.segment_manager import SegmentManager
+            from account_and_entitys.models import XX_Segment
+            import uuid
+            import os
+            
+            # Get required segment types only
+            required_segment_types = SegmentManager.get_required_segment_types()
+            
+            if not required_segment_types.exists():
+                return Response(
+                    {
+                        "error": "No required segments configured",
+                        "message": "Please configure segment types before downloading template."
+                    },
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+            
+            # Build column headers using segment alias or name
+            columns = []
+            segment_info = []
+            
+            for seg_type in required_segment_types:
+                # Use segment_name as header (alias is on segment values, not types)
+                header_name = seg_type.segment_name
+                columns.append(header_name)
+                
+                # Get sample values (first 5) to show as examples
+                sample_values = list(
+                    XX_Segment.objects.filter(
+                        segment_type=seg_type,
+                        is_active=True
+                    ).values('code', 'alias')[:5]
+                )
+                
+                segment_info.append({
+                    'segment_id': seg_type.segment_id,
+                    'segment_name': seg_type.segment_name,
+                    'column_header': header_name,
+                    'is_required': seg_type.is_required,
+                    'sample_values': sample_values
+                })
+            
+            # Add amount and reason columns
+            columns.extend(['from_center', 'to_center', 'reason'])
+            
+            # Create DataFrame with empty rows for template (no sample data)
+            df = pd.DataFrame(columns=columns)
+            
+            # Create media/templates directory if it doesn't exist
+            templates_dir = os.path.join(settings.MEDIA_ROOT, 'templates')
+            os.makedirs(templates_dir, exist_ok=True)
+            
+            # Generate unique filename
+            filename = f"transfer_template_{uuid.uuid4().hex[:8]}.xlsx"
+            file_path = os.path.join(templates_dir, filename)
+            
+            # Create Excel file
+            with pd.ExcelWriter(file_path, engine='openpyxl') as writer:
+                df.to_excel(writer, sheet_name='Transfers', index=False)
+                
+                # Add instruction sheet
+                instructions_df = pd.DataFrame({
+                    'Instructions': [
+                        'TRANSFER TEMPLATE INSTRUCTIONS',
+                        '==============================',
+                        '',
+                        'Required Columns:',
+                        '- ' + ', '.join([s.segment_name for s in required_segment_types]),
+                        '- from_center OR to_center (one must be > 0)',
+                        '',
+                        'Optional Columns:',
+                        '- reason: Explanation for the transfer',
+                        '',
+                        'IMPORTANT RULES:',
+                        '1. Each row should have EITHER from_center > 0 OR to_center > 0, not both',
+                        '2. from_center > 0 means TAKING funds FROM this segment combination',
+                        '3. to_center > 0 means GIVING funds TO this segment combination',
+                        '4. You can enter segment CODE or ALIAS (description) - system will match both',
+                        '',
+                        'SEGMENT VALUES (CODE - ALIAS):',
+                    ]
+                })
+                
+                # Add segment values reference
+                for seg_info in segment_info:
+                    instructions_df = pd.concat([
+                        instructions_df,
+                        pd.DataFrame({'Instructions': [f"\n{seg_info['segment_name']}:"]})
+                    ], ignore_index=True)
+                    
+                    for val in seg_info['sample_values']:
+                        alias_text = f" - {val['alias']}" if val.get('alias') else ""
+                        instructions_df = pd.concat([
+                            instructions_df,
+                            pd.DataFrame({'Instructions': [f"  {val['code']}{alias_text}"]})
+                        ], ignore_index=True)
+                    
+                    # Count total values
+                    total_count = XX_Segment.objects.filter(
+                        segment_type_id=seg_info['segment_id'],
+                        is_active=True
+                    ).count()
+                    
+                    if total_count > 5:
+                        instructions_df = pd.concat([
+                            instructions_df,
+                            pd.DataFrame({'Instructions': [f"  ... and {total_count - 5} more values"]})
+                        ], ignore_index=True)
+                
+                instructions_df.to_excel(writer, sheet_name='Instructions', index=False)
+            
+            # Build download URL
+            download_url = request.build_absolute_uri(f"{settings.MEDIA_URL}templates/{filename}")
+            
+            return Response({
+                "message": "Template generated successfully",
+                "download_url": download_url,
+                "filename": filename,
+                #"columns": columns,
+                #"segment_info": segment_info
+            }, status=status.HTTP_200_OK)
+            
+        except Exception as e:
+            import traceback
+            return Response(
+                {
+                    "error": "Error generating template",
+                    "message": str(e),
+                    "traceback": traceback.format_exc()
+                },
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
+
+
 class TransactionTransferExcelUploadView(APIView):
     """
     Upload Excel file to create transaction transfers with DYNAMIC SEGMENT support.
     
-    Supports two Excel formats:
-    1. NEW FORMAT (Dynamic Segments):
-       Columns: from_center, to_center, reason (optional), plus dynamic segment columns
-       Segment columns format: <segment_name>_from, <segment_name>_to
-       Example: entity_from, entity_to, account_from, account_to, project_from, project_to
+    NEW FORMAT (Recommended):
+    - Uses segment aliases or codes from Excel columns
+    - Columns: <segment_name>, from_center, to_center, reason (optional)
+    - Example: Entity, Account, Project, from_center, to_center
+    - Matches segment by CODE or ALIAS (case-insensitive)
     
-    2. LEGACY FORMAT (Backward Compatibility):
-       Columns: cost_center_code, account_code, project_code, from_center, to_center
+    Download template from GET /api/transfers/excel-template/
     """
 
     permission_classes = [IsAuthenticated]
+    
+    def _find_segment_by_code_or_alias(self, segment_type, value):
+        """
+        Find segment by code or alias (case-insensitive).
+        Also handles leading zeros (adds/removes them if needed).
+        Returns XX_Segment object or None.
+        """
+        from account_and_entitys.models import XX_Segment
+        
+        if not value:
+            return None
+        
+        value_str = str(value).strip()
+        if not value_str or value_str.lower() in ['nan', 'none', '']:
+            return None
+        
+        # Handle numeric values that might have lost leading zeros (e.g., from Excel)
+        # Convert to string properly - if it's a float like 13800000000.0, convert to int first
+        if '.' in value_str and value_str.replace('.', '').replace('-', '').isdigit():
+            try:
+                value_str = str(int(float(value_str)))
+            except (ValueError, OverflowError):
+                pass
+        
+        # Try exact code match first
+        segment = XX_Segment.objects.filter(
+            segment_type=segment_type,
+            code=value_str,
+            is_active=True
+        ).first()
+        
+        if segment:
+            return segment
+        
+        # Try with leading zero added (e.g., 13800000000 -> 013800000000)
+        if value_str.isdigit():
+            value_with_zero = '0' + value_str
+            segment = XX_Segment.objects.filter(
+                segment_type=segment_type,
+                code=value_with_zero,
+                is_active=True
+            ).first()
+            
+            if segment:
+                return segment
+        
+        # Try with leading zero removed (e.g., 013800000000 -> 13800000000)
+        if value_str.startswith('0') and len(value_str) > 1:
+            value_without_zero = value_str.lstrip('0')
+            segment = XX_Segment.objects.filter(
+                segment_type=segment_type,
+                code=value_without_zero,
+                is_active=True
+            ).first()
+            
+            if segment:
+                return segment
+        
+        # Try case-insensitive code match
+        segment = XX_Segment.objects.filter(
+            segment_type=segment_type,
+            code__iexact=value_str,
+            is_active=True
+        ).first()
+        
+        if segment:
+            return segment
+        
+        # Try code ending with value (for cases where prefix is missing)
+        if value_str.isdigit() and len(value_str) >= 6:
+            segment = XX_Segment.objects.filter(
+                segment_type=segment_type,
+                code__endswith=value_str,
+                is_active=True
+            ).first()
+            
+            if segment:
+                return segment
+        
+        # Try exact alias match
+        segment = XX_Segment.objects.filter(
+            segment_type=segment_type,
+            alias=value_str,
+            is_active=True
+        ).first()
+        
+        if segment:
+            return segment
+        
+        # Try case-insensitive alias match
+        segment = XX_Segment.objects.filter(
+            segment_type=segment_type,
+            alias__iexact=value_str,
+            is_active=True
+        ).first()
+        
+        if segment:
+            return segment
+        
+        # Try partial alias match (contains)
+        segment = XX_Segment.objects.filter(
+            segment_type=segment_type,
+            alias__icontains=value_str,
+            is_active=True
+        ).first()
+        
+        return segment
 
     def post(self, request):
         # Get transaction_id from the request
@@ -1417,296 +1673,170 @@ class TransactionTransferExcelUploadView(APIView):
             # Read Excel file
             df = pd.read_excel(excel_file)
             
-            # Get all configured segment types
-            segment_types = SegmentManager.get_all_segment_types()
+            # Normalize column names (strip whitespace, case-insensitive)
+            df.columns = [str(col).strip() for col in df.columns]
+            columns_lower = {col.lower(): col for col in df.columns}
             
-            # Detect Excel format: SIMPLIFIED (single code), DYNAMIC (from/to pairs), or LEGACY (hardcoded 3 segments)
-            legacy_columns = ["cost_center_code", "account_code", "project_code"]
-            has_legacy_columns = all(col in df.columns for col in legacy_columns)
+            # Get required segment types
+            required_segment_types = list(SegmentManager.get_required_segment_types())
             
-            # Check for SIMPLIFIED format (single code columns, e.g., entity, account, project)
-            segment_column_simplified = []
-            for seg_type in segment_types:
-                seg_name_lower = seg_type.segment_name.lower().replace(" ", "_").replace("(", "").replace(")", "")
-                code_col = seg_name_lower  # Just the segment name without _from/_to
-                
-                if code_col in df.columns:
-                    segment_column_simplified.append({
-                        'segment_type': seg_type,
-                        'code_col': code_col
-                    })
-            
-            has_simplified_columns = len(segment_column_simplified) > 0
-            
-            # Check for DYNAMIC format (from/to pairs)
-            segment_column_pairs = []
-            for seg_type in segment_types:
-                seg_name_lower = seg_type.segment_name.lower().replace(" ", "_").replace("(", "").replace(")", "")
-                from_col = f"{seg_name_lower}_from"
-                to_col = f"{seg_name_lower}_to"
-                
-                if from_col in df.columns and to_col in df.columns:
-                    segment_column_pairs.append({
-                        'segment_type': seg_type,
-                        'from_col': from_col,
-                        'to_col': to_col
-                    })
-            
-            has_dynamic_columns = len(segment_column_pairs) > 0
-            
-            # Determine format (priority: SIMPLIFIED > DYNAMIC > LEGACY)
-            if has_simplified_columns:
-                format_type = "SIMPLIFIED"
-                # Validate required columns for simplified format
-                required_columns = ["from_center", "to_center"]
-                missing_columns = [col for col in required_columns if col not in df.columns]
-                
-                if missing_columns:
-                    return Response(
-                        {
-                            "error": "Missing columns in Excel file",
-                            "message": f'The following columns are missing: {", ".join(missing_columns)}',
-                            "required_columns": required_columns + [pair['code_col'] for pair in segment_column_simplified],
-                            "detected_format": "SIMPLIFIED"
-                        },
-                        status=status.HTTP_400_BAD_REQUEST,
-                    )
-            elif has_dynamic_columns:
-                format_type = "DYNAMIC"
-                # Validate required columns for dynamic format
-                required_columns = ["from_center", "to_center"]
-                missing_columns = [col for col in required_columns if col not in df.columns]
-                
-                if missing_columns:
-                    return Response(
-                        {
-                            "error": "Missing columns in Excel file",
-                            "message": f'The following columns are missing: {", ".join(missing_columns)}',
-                            "required_columns": required_columns + [pair['from_col'] for pair in segment_column_pairs] + [pair['to_col'] for pair in segment_column_pairs],
-                            "detected_format": "DYNAMIC"
-                        },
-                        status=status.HTTP_400_BAD_REQUEST,
-                    )
-            elif has_legacy_columns:
-                format_type = "LEGACY"
-                # Validate required columns for legacy format
-                required_columns = [
-                    "cost_center_code",
-                    "account_code",
-                    "project_code",
-                    "from_center",
-                    "to_center",
-                ]
-                missing_columns = [col for col in required_columns if col not in df.columns]
-                
-                if missing_columns:
-                    return Response(
-                        {
-                            "error": "Missing columns in Excel file",
-                            "message": f'The following columns are missing: {", ".join(missing_columns)}',
-                            "required_columns": required_columns,
-                            "detected_format": "LEGACY"
-                        },
-                        status=status.HTTP_400_BAD_REQUEST,
-                    )
-            else:
-                # Cannot determine format
-                expected_simplified_cols = []
-                expected_dynamic_cols = []
-                for seg_type in segment_types:
-                    seg_name_lower = seg_type.segment_name.lower().replace(" ", "_").replace("(", "").replace(")", "")
-                    expected_simplified_cols.append(seg_name_lower)
-                    expected_dynamic_cols.append(f"{seg_name_lower}_from")
-                    expected_dynamic_cols.append(f"{seg_name_lower}_to")
-                
+            if not required_segment_types:
                 return Response(
                     {
-                        "error": "Invalid Excel format",
-                        "message": "Could not detect Excel format. Please use SIMPLIFIED, DYNAMIC, or LEGACY format.",
-                        "legacy_format_columns": ["cost_center_code", "account_code", "project_code", "from_center", "to_center"],
-                        "simplified_format_columns": ["from_center", "to_center"] + expected_simplified_cols,
-                        "dynamic_format_columns": ["from_center", "to_center"] + expected_dynamic_cols,
-                        "example_simplified": "entity_cost_center, account, project (NEW - single code per segment)",
-                        "example_dynamic_columns": "entity_from, entity_to, account_from, account_to, project_from, project_to"
+                        "error": "No required segments configured",
+                        "message": "Please configure segment types before uploading."
+                    },
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+            
+            # Match segment columns by name (case-insensitive)
+            segment_column_mapping = []
+            missing_segments = []
+            
+            for seg_type in required_segment_types:
+                seg_name_lower = seg_type.segment_name.lower()
+                
+                # Try to find matching column
+                matched_col = None
+                
+                # Check exact match (case-insensitive)
+                if seg_name_lower in columns_lower:
+                    matched_col = columns_lower[seg_name_lower]
+                else:
+                    # Try variations: underscore for space, remove parentheses
+                    seg_name_variants = [
+                        seg_name_lower,
+                        seg_name_lower.replace(" ", "_"),
+                        seg_name_lower.replace(" ", ""),
+                        seg_name_lower.replace("(", "").replace(")", ""),
+                        seg_name_lower.replace("_", " "),
+                    ]
+                    
+                    for variant in seg_name_variants:
+                        if variant in columns_lower:
+                            matched_col = columns_lower[variant]
+                            break
+                
+                if matched_col:
+                    segment_column_mapping.append({
+                        'segment_type': seg_type,
+                        'column': matched_col
+                    })
+                else:
+                    missing_segments.append(seg_type.segment_name)
+            
+            # Check for required amount columns
+            has_from_center = 'from_center' in columns_lower
+            has_to_center = 'to_center' in columns_lower
+            
+            # Build list of missing columns
+            missing_columns = []
+            if not has_from_center:
+                missing_columns.append('from_center')
+            if not has_to_center:
+                missing_columns.append('to_center')
+            missing_columns.extend(missing_segments)
+            
+            if missing_columns:
+                expected_columns = [seg.segment_name for seg in required_segment_types] + ['from_center', 'to_center', 'reason (optional)']
+                return Response(
+                    {
+                        "error": "Missing columns in Excel file",
+                        "message": f'The following columns are missing: {", ".join(missing_columns)}',
+                        "expected_columns": expected_columns,
+                        "found_columns": list(df.columns),
+                        "tip": "Download the template from GET /api/transfers/excel-template/"
                     },
                     status=status.HTTP_400_BAD_REQUEST,
                 )
-
-            # Delete existing transfers for this transaction (commented out - uncomment if needed)
-            # xx_TransactionTransfer.objects.filter(transaction=transaction_id).delete()
-
-            # Process Excel data based on detected format
+            
+            # Get actual column names for amounts
+            from_center_col = columns_lower.get('from_center', 'from_center')
+            to_center_col = columns_lower.get('to_center', 'to_center')
+            reason_col = columns_lower.get('reason', None)
+            
+            # Process Excel data
             created_transfers = []
             errors = []
 
             for index, row in df.iterrows():
                 try:
-                    if format_type == "SIMPLIFIED":
-                        # NEW SIMPLIFIED FORMAT: Single code per segment
-                        # Build segments dictionary from Excel columns
-                        segments_data = {}
-                        for pair in segment_column_simplified:
-                            seg_type = pair['segment_type']
-                            code = str(row[pair['code_col']]).strip()
-                            
-                            # Skip if code is empty
-                            if not code or code.lower() in ['nan', 'none', '']:
-                                code = None
-                            
-                            if code:
-                                segments_data[seg_type.segment_id] = {
-                                    'code': code  # NEW: Single code field
-                                }
+                    # Build segments dictionary matching by code or alias
+                    segments_data = {}
+                    segment_errors = []
+                    
+                    for mapping in segment_column_mapping:
+                        seg_type = mapping['segment_type']
+                        col_name = mapping['column']
+                        cell_value = row[col_name]
                         
-                        # Build transfer data
-                        transfer_data = {
-                            "transaction": transaction_id,
-                            "from_center": (
-                                float(row["from_center"])
-                                if not pd.isna(row["from_center"])
-                                else 0
-                            ),
-                            "to_center": (
-                                float(row["to_center"])
-                                if not pd.isna(row["to_center"])
-                                else 0
-                            ),
-                            "reason": (
-                                str(row["reason"]) 
-                                if "reason" in df.columns and not pd.isna(row.get("reason"))
-                                else f"Transfer from Excel upload (row {index + 2})"
-                            ),
-                            "segments": segments_data
-                        }
+                        # Find segment by code or alias
+                        segment = self._find_segment_by_code_or_alias(seg_type, cell_value)
                         
-                        # Use simplified serializer
-                        serializer = TransactionTransferCreateSerializer(data=transfer_data)
-                        if serializer.is_valid():
-                            transfer = serializer.save()
-                            # Return with dynamic segment details
-                            response_serializer = TransactionTransferDynamicSerializer(transfer)
-                            created_transfers.append(response_serializer.data)
-                        else:
-                            errors.append(
-                                {
-                                    "row": index + 2,
-                                    "error": serializer.errors,
-                                    "data": transfer_data,
-                                }
+                        if segment:
+                            segments_data[seg_type.segment_id] = {
+                                'code': segment.code  # Use actual code for the serializer
+                            }
+                        elif seg_type.is_required:
+                            segment_errors.append(
+                                f"Cannot find {seg_type.segment_name} with code/alias '{cell_value}'"
                             )
                     
-                    elif format_type == "DYNAMIC":
-                        # DYNAMIC FORMAT: from/to code pairs
-                        # Build segments dictionary from Excel columns
-                        segments_data = {}
-                        for pair in segment_column_pairs:
-                            seg_type = pair['segment_type']
-                            from_code = str(row[pair['from_col']]).strip()
-                            to_code = str(row[pair['to_col']]).strip()
-                            
-                            # Skip if both codes are empty
-                            if not from_code or from_code.lower() in ['nan', 'none', '']:
-                                from_code = None
-                            if not to_code or to_code.lower() in ['nan', 'none', '']:
-                                to_code = None
-                            
-                            if from_code or to_code:
-                                segments_data[seg_type.segment_id] = {
-                                    'from_code': from_code,
-                                    'to_code': to_code
-                                }
-                        
-                        # Build transfer data
-                        transfer_data = {
-                            "transaction": transaction_id,
-                            "from_center": (
-                                float(row["from_center"])
-                                if not pd.isna(row["from_center"])
-                                else 0
-                            ),
-                            "to_center": (
-                                float(row["to_center"])
-                                if not pd.isna(row["to_center"])
-                                else 0
-                            ),
-                            "reason": (
-                                str(row["reason"]) 
-                                if "reason" in df.columns and not pd.isna(row.get("reason"))
-                                else f"Transfer from Excel upload (row {index + 2})"
-                            ),
-                            "segments": segments_data
-                        }
-                        
-                        # Use dynamic serializer
-                        serializer = TransactionTransferCreateSerializer(data=transfer_data)
-                        if serializer.is_valid():
-                            transfer = serializer.save()
-                            # Return with dynamic segment details
-                            response_serializer = TransactionTransferDynamicSerializer(transfer)
-                            created_transfers.append(response_serializer.data)
-                        else:
-                            errors.append(
-                                {
-                                    "row": index + 2,  # +2 because Excel is 1-indexed and there's a header row
-                                    "error": serializer.errors,
-                                    "data": transfer_data,
-                                    "format": "DYNAMIC"
-                                }
-                            )
+                    if segment_errors:
+                        errors.append({
+                            "row": index + 2,
+                            "error": segment_errors,
+                            "data": {col: str(row[col]) for col in df.columns}
+                        })
+                        continue
                     
-                    else:  # LEGACY format
-                        # LEGACY FORMAT: Backward compatibility
-                        transfer_data = {
-                            "transaction": transaction_id,
-                            "cost_center_code": str(row["cost_center_code"]),
-                            "project_code": str(row["project_code"]),
-                            "account_code": str(row["account_code"]),
-                            "from_center": (
-                                float(row["from_center"])
-                                if not pd.isna(row["from_center"])
-                                else 0
-                            ),
-                            "to_center": (
-                                float(row["to_center"])
-                                if not pd.isna(row["to_center"])
-                                else 0
-                            ),
-                            # Set default values for other required fields
-                            "approved_budget": 0,
-                            "available_budget": 0,
-                            "encumbrance": 0,
-                            "actual": 0,
-                        }
-
-                        # Validate and save with legacy serializer
-                        serializer = TransactionTransferSerializer(data=transfer_data)
-                        if serializer.is_valid():
-                            transfer = serializer.save()
-                            created_transfers.append(serializer.data)
-                        else:
-                            errors.append(
-                                {
-                                    "row": index + 2,
-                                    "error": serializer.errors,
-                                    "data": transfer_data,
-                                    "format": "LEGACY"
-                                }
-                            )
+                    # Build transfer data
+                    from_val = row[from_center_col]
+                    to_val = row[to_center_col]
+                    
+                    transfer_data = {
+                        "transaction": transaction_id,
+                        "from_center": float(from_val) if not pd.isna(from_val) else 0,
+                        "to_center": float(to_val) if not pd.isna(to_val) else 0,
+                        "reason": (
+                            str(row[reason_col]) 
+                            if reason_col and reason_col in df.columns and not pd.isna(row.get(reason_col))
+                            else f"Transfer from Excel upload (row {index + 2})"
+                        ),
+                        "segments": segments_data
+                    }
+                    
+                    # Use create serializer
+                    serializer = TransactionTransferCreateSerializer(data=transfer_data)
+                    if serializer.is_valid():
+                        transfer = serializer.save()
+                        # Return with dynamic segment details
+                        response_serializer = TransactionTransferDynamicSerializer(transfer)
+                        created_transfers.append(response_serializer.data)
+                    else:
+                        errors.append({
+                            "row": index + 2,
+                            "error": serializer.errors,
+                            "data": transfer_data,
+                        })
                             
                 except Exception as row_error:
-                    errors.append(
-                        {
-                            "row": index + 2,
-                            "error": str(row_error),
-                            "data": row.to_dict(),
-                            "format": format_type
-                        }
-                    )
+                    errors.append({
+                        "row": index + 2,
+                        "error": str(row_error),
+                        "data": {col: str(row[col]) for col in df.columns}
+                    })
 
             # Return results
             response_data = {
                 "message": f"Processed {len(created_transfers) + len(errors)} rows from Excel file",
-                "format_detected": format_type,
+                "format": "DYNAMIC_SEGMENT",
+                "segment_columns_matched": [
+                    {
+                        'segment_name': m['segment_type'].segment_name,
+                        'excel_column': m['column']
+                    } for m in segment_column_mapping
+                ],
                 "created": created_transfers,
                 "created_count": len(created_transfers),
                 "errors": errors,
@@ -1733,6 +1863,53 @@ class TransactionTransferExcelUploadView(APIView):
                 },
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR,
             )
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 # class BudgetQuestionAnswerView(APIView):
