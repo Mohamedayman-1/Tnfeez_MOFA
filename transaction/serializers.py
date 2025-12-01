@@ -132,14 +132,14 @@ class TransactionTransferCreateSerializer(serializers.ModelSerializer):
         # Both cannot be positive
         if from_val > 0 and to_val > 0:
             raise serializers.ValidationError(
-                "Cannot have both from_center and to_center with positive values. "
-                "Each transfer row must be EITHER a source (from_center > 0) OR a destination (to_center > 0)."
+                "لا يمكن أن يكون كل من 'من المركز' و'إلى المركز' قيم موجبة. "
+                "يجب أن يكون كل صف تحويل إما مصدر (من المركز > 0) أو وجهة (إلى المركز > 0)."
             )
         
         # At least one must be positive
         if from_val <= 0 and to_val <= 0:
             raise serializers.ValidationError(
-                "Either from_center or to_center must be greater than 0."
+                "يجب أن يكون 'من المركز' أو 'إلى المركز' أكبر من 0."
             )
         
         return data
@@ -223,14 +223,14 @@ class TransactionTransferUpdateSerializer(serializers.ModelSerializer):
         # Both cannot be positive
         if from_val > 0 and to_val > 0:
             raise serializers.ValidationError(
-                "Cannot have both from_center and to_center with positive values. "
-                "Each transfer row must be EITHER a source (from_center > 0) OR a destination (to_center > 0)."
+                "لا يمكن أن يكون كل من 'من المركز' و'إلى المركز' قيم موجبة. "
+                "يجب أن يكون كل صف تحويل إما مصدر (من المركز > 0) أو وجهة (إلى المركز > 0)."
             )
         
         # At least one must be positive
         if from_val <= 0 and to_val <= 0:
             raise serializers.ValidationError(
-                "Either from_center or to_center must be greater than 0."
+                "يجب أن يكون 'من المركز' أو 'إلى المركز' أكبر من 0."
             )
         
         return data

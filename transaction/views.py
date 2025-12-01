@@ -93,7 +93,7 @@ def validate_transaction_dynamic(data, code=None):
 
     for field in required_fields:
         if field not in data or data[field] is None:
-            errors.append(f"{field} is required")
+            errors.append(f"الحقل {field} مطلوب")
 
     # If basic required fields are missing, stop further validation
     if errors:
@@ -102,14 +102,14 @@ def validate_transaction_dynamic(data, code=None):
     # Validation 2: from_center or to_center must be positive
     if code and code[0:3] != "AFR":
         if Decimal(str(data["from_center"])) < 0:
-            errors.append("from amount must be positive")
+            errors.append("مبلغ التحويل (من) يجب أن يكون موجباً")
 
         if Decimal(str(data["to_center"])) < 0:
-            errors.append("to amount must be positive")
+            errors.append("مبلغ التحويل (إلى) يجب أن يكون موجباً")
 
     # Validation 3: Check if both from_center and to_center are positive
     if Decimal(str(data["from_center"])) > 0 and Decimal(str(data["to_center"])) > 0:
-        errors.append("Can't have value in both from and to at the same time")
+        errors.append("لا يمكن وضع قيمة في كل من (من) و (إلى) في نفس الوقت")
 
     # Validation 4: Check if available_budget > from_center
     if code and code[0:3] != "AFR":
@@ -127,7 +127,7 @@ def validate_transaction_dynamic(data, code=None):
         if not validation_result['valid']:
             errors.extend(validation_result['errors'])
     else:
-        errors.append("Segment data is required")
+        errors.append("بيانات الأقسام مطلوبة")
 
     # Validation 6: Check for duplicate transfers (same transaction + segment combination)
     if "transaction_id" in data and segments_data:
@@ -185,8 +185,8 @@ def validate_transaction_dynamic(data, code=None):
                         for v in segments_data.values()
                     ])
                 errors.append(
-                    f"Duplicate transfer with same segment combination ({segment_summary}) "
-                    f"found (ID: {existing_transfer.transfer_id})"
+                    f"تم العثور على تحويل مكرر بنفس مجموعة الأقسام ({segment_summary}) "
+                    f"(المعرف: {existing_transfer.transfer_id})"
                 )
                 break
 
@@ -231,7 +231,7 @@ def validate_transaction(data, code=None):
 
     for field in required_fields:
         if field not in data or data[field] is None:
-            errors.append(f"{field} is required")
+            errors.append(f"الحقل {field} مطلوب")
 
     # If basic required fields are missing, stop further validation
     if errors:
@@ -240,16 +240,16 @@ def validate_transaction(data, code=None):
     # Validation 2: from_center or to_center must be positive
     if code[0:3] != "AFR":
         if Decimal(data["from_center"]) < 0:
-            errors.append("from amount must be positive")
+            errors.append("مبلغ التحويل (من) يجب أن يكون موجباً")
 
         if Decimal(data["to_center"]) < 0:
-            errors.append("to amount must be positive")
+            errors.append("مبلغ التحويل (إلى) يجب أن يكون موجباً")
 
     # Validation 3: Check if both from_center and to_center are positive
 
     if Decimal(data["from_center"]) > 0 and Decimal(data["to_center"]) > 0:
 
-        errors.append("Can't have value in both from and to at the same time")
+        errors.append("لا يمكن وضع قيمة في كل من (من) و (إلى) في نفس الوقت")
 
     # Validation 4: Check if available_budget > from_center
     #if code[0:3] != "AFR":
@@ -269,9 +269,9 @@ def validate_transaction(data, code=None):
         existing_transfers = existing_transfers.exclude(transfer_id=data["transfer_id"])
 
     if existing_transfers.exists():
-        duplicates = [f"ID: {t.transfer_id}" for t in existing_transfers[:3]]
+        duplicates = [f"المعرف: {t.transfer_id}" for t in existing_transfers[:3]]
         errors.append(
-            f"Duplicate transfer for account code {data['account_code']} and project code {data['project_code']} and cost center {data['cost_center_code']} (Found: {', '.join(duplicates)})"
+            f"تحويل مكرر لرمز الحساب {data['account_code']} ورمز المشروع {data['project_code']} ومركز التكلفة {data['cost_center_code']} (تم العثور على: {', '.join(duplicates)})"
         )
 
     return errors
@@ -303,7 +303,7 @@ def validate_transaction_transfer_dynamic(data, code=None, errors=None):
     
     segments_data = data.get("segments", {})
     if not segments_data:
-        errors.append("Segments data is required for validation")
+        errors.append("بيانات الأقسام مطلوبة للتحقق")
         return errors
     
     # Determine transfer direction (source or destination)
@@ -345,10 +345,10 @@ def validate_transaction_transfer_dynamic(data, code=None, errors=None):
                     to_segment_combo[segment_type_id] = to_code
         
         except XX_SegmentType.DoesNotExist:
-            errors.append(f"Invalid segment type ID: {seg_id}")
+            errors.append(f"معرف نوع القسم غير صالح: {seg_id}")
             continue
         except (ValueError, TypeError):
-            errors.append(f"Invalid segment ID format: {seg_id}")
+            errors.append(f"صيغة معرف القسم غير صالحة: {seg_id}")
             continue
     
     # NEW: Use SegmentTransferLimitManager to validate transfer limits
@@ -940,9 +940,9 @@ class TransactionTransferListView(APIView):
         if budget.type == 'FAR' and len(response_data) >= 2:
             if Total_from_Value != Total_to_Value:
                 if Total_from_Value > Total_to_Value:
-                    far_balance_error = "برجاء التحقق من قيمة ارصدت التوزيع حيث ان مجموع المنقول منه اكبر من مجموع المنقول اليه"
+                    far_balance_error = "برجاء التحقق من قيمة ارصدة التوزيع حيث ان مجموع المنقول منه اكبر من مجموع المنقول اليه"
                 else:
-                    far_balance_error = "برجاء التحقق من قيمة ارصدت التوزيع حيث ان مجموع المنقول اليه اكبر من مجموع المنقول منه"
+                    far_balance_error = "برجاء التحقق من قيمة ارصدة التوزيع حيث ان مجموع المنقول اليه اكبر من مجموع المنقول منه"
                 
                 # Add this error to all transfers
                 for transfer_data in response_data:
@@ -1738,14 +1738,14 @@ class TransactionTransferExcelUploadView(APIView):
             missing_columns.extend(missing_segments)
             
             if missing_columns:
-                expected_columns = [seg.segment_name for seg in required_segment_types] + ['from_center', 'to_center', 'reason (optional)']
+                expected_columns = [seg.segment_name for seg in required_segment_types] + ['from_center', 'to_center', 'reason (اختياري)']
                 return Response(
                     {
-                        "error": "Missing columns in Excel file",
-                        "message": f'The following columns are missing: {", ".join(missing_columns)}',
+                        "error": "أعمدة مفقودة في ملف Excel",
+                        "message": f'الأعمدة التالية مفقودة: {", ".join(missing_columns)}',
                         "expected_columns": expected_columns,
                         "found_columns": list(df.columns),
-                        "tip": "Download the template from GET /api/transfers/excel-template/"
+                        "tip": "قم بتحميل القالب من GET /api/transfers/excel-template/"
                     },
                     status=status.HTTP_400_BAD_REQUEST,
                 )
@@ -1779,7 +1779,7 @@ class TransactionTransferExcelUploadView(APIView):
                             }
                         elif seg_type.is_required:
                             segment_errors.append(
-                                f"Cannot find {seg_type.segment_name} with code/alias '{cell_value}'"
+                                f"لا يمكن العثور على {seg_type.segment_name} بالرمز/الاسم '{cell_value}'"
                             )
                     
                     if segment_errors:
