@@ -411,6 +411,11 @@ class SegmentListView(APIView):
     
     Works with any number of segment types (not limited to 3) and retrieves segment type info dynamically.
     
+    ACCESS CONTROL:
+    - SuperAdmin users: See ALL segments for the segment type
+    - Admin/Regular users: See only segments they have been granted access to via XX_UserSegmentAccess
+    - If user has no access grants for a segment type, they see NO segments (empty list)
+    
     Query Parameters:
     - segment_type: REQUIRED - Segment type ID to retrieve (from XX_SegmentType table)
                     Can also use segment_name (e.g., 'Entity', 'Account', 'Project', or any custom type)
@@ -424,16 +429,24 @@ class SegmentListView(APIView):
     - same_filter_code: Optional. A segment code to look up in XX_gfs_Mamping.
         If the mapping has Same='yes', only return segments with Same='yes'.
         If the mapping has Same='no', only return segments with Same='no'.
+    - bypass_access_filter: Optional (superadmin only). Set to 'true' to bypass user access filter.
     """
 
     permission_classes = [IsAuthenticated]
     pagination_class = EntityPagination
 
     def get(self, request):
+        from user_management.managers import UserSegmentAccessManager
+        
         search_query = request.query_params.get("search", None)
         filter_type = request.query_params.get("filter", "all").lower()
         segment_type_param = request.query_params.get("segment_type", None)
         same_filter_code = request.query_params.get("same_filter_code", None)
+        bypass_access_filter = request.query_params.get("bypass_access_filter", "false").lower() == "true"
+        
+        # Check if user is superadmin
+        user = request.user
+        is_superadmin = getattr(user, 'role', None) == 'superadmin'
 
         # Validate segment_type parameter
         if not segment_type_param:
@@ -482,6 +495,34 @@ class SegmentListView(APIView):
             segment_type=segment_type_obj,
             is_active=True
         )
+        
+        # ACCESS CONTROL: Filter segments based on user access
+        # SuperAdmin can bypass with bypass_access_filter=true parameter
+        # All other users (including superadmin without bypass) are filtered by their assigned segments
+        user_access_applied = False
+        user_allowed_segment_codes = []
+        
+        # Determine if we should apply access filter
+        # Only superadmin with bypass_access_filter=true skips the filter
+        should_apply_access_filter = not (is_superadmin and bypass_access_filter)
+        
+        if should_apply_access_filter:
+            # Get user's allowed segments for this segment type
+            access_result = UserSegmentAccessManager.get_user_allowed_segments(
+                user=user,
+                segment_type_id=segment_type_obj.segment_id,
+                access_level=None,  # Any access level allows viewing
+                include_inactive=False
+            )
+            
+            if access_result['success'] and access_result['segments']:
+                user_allowed_segment_codes = [seg['segment_code'] for seg in access_result['segments']]
+                segments = segments.filter(code__in=user_allowed_segment_codes)
+                user_access_applied = True
+            else:
+                # User has no access to any segments of this type - return empty
+                segments = segments.none()
+                user_access_applied = True
 
         # Apply filter based on filter_type parameter
         if filter_type in ['root', 'zero_level']:
@@ -568,7 +609,14 @@ class SegmentListView(APIView):
                 "filter_applied": filter_type,
                 "same_filter_code": same_filter_code,
                 "same_filter_value": same_filter_value,
-                "total_count": segments.count()
+                "total_count": segments.count(),
+                # Access control info
+                "access_control": {
+                    "user_is_superadmin": is_superadmin,
+                    "access_filter_applied": user_access_applied,
+                    "user_allowed_segments_count": len(user_allowed_segment_codes) if user_access_applied else None,
+                    "bypass_access_filter": bypass_access_filter if is_superadmin else None
+                }
             }
         )
 

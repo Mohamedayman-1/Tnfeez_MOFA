@@ -1515,3 +1515,653 @@ class ValidateAbilityForOperationView(APIView):
                 'success': False,
                 'error': str(e)
             }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+# =============================================================================
+# USER REQUIRED SEGMENT ACCESS VIEWS
+# =============================================================================
+
+class RequiredSegmentTypesView(APIView):
+    """
+    Get all required segment types that users must have access to.
+    
+    GET /api/auth/phase4/required-segments/types
+    
+    Returns:
+        {
+            "success": true,
+            "required_segment_types": [
+                {
+                    "segment_id": 1,
+                    "segment_name": "Entity",
+                    "description": "Cost center/department",
+                    "is_required": true,
+                    "has_hierarchy": true,
+                    "segment_count": 50
+                },
+                ...
+            ],
+            "total_required_types": 3
+        }
+    """
+    permission_classes = [IsAuthenticated]
+    
+    def get(self, request):
+        from account_and_entitys.models import XX_SegmentType, XX_Segment
+        
+        try:
+            # Get all required segment types
+            required_types = XX_SegmentType.objects.filter(
+                is_required=True,
+                is_active=True
+            ).order_by('display_order', 'segment_id')
+            
+            types_data = []
+            for seg_type in required_types:
+                segment_count = XX_Segment.objects.filter(
+                    segment_type=seg_type,
+                    is_active=True
+                ).count()
+                
+                types_data.append({
+                    'segment_id': seg_type.segment_id,
+                    'segment_name': seg_type.segment_name,
+                    'segment_type': seg_type.segment_type,
+                    'description': seg_type.description,
+                    'is_required': seg_type.is_required,
+                    'has_hierarchy': seg_type.has_hierarchy,
+                    'display_order': seg_type.display_order,
+                    'segment_count': segment_count
+                })
+            
+            return Response({
+                'success': True,
+                'required_segment_types': types_data,
+                'total_required_types': len(types_data)
+            })
+            
+        except Exception as e:
+            return Response({
+                'success': False,
+                'error': str(e)
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+class UserRequiredSegmentsStatusView(APIView):
+    """
+    Get user's access status for all required segment types.
+    Shows which required segments the user has access to and which are missing.
+    
+    GET /api/auth/phase4/required-segments/user-status
+    
+    Query Parameters:
+        - user_id (int): User ID to check (required for admins, optional for self-check)
+    
+    Returns:
+        {
+            "success": true,
+            "user_id": 5,
+            "username": "john_doe",
+            "all_required_segments_assigned": false,
+            "required_segments_status": [
+                {
+                    "segment_type_id": 1,
+                    "segment_type_name": "Entity",
+                    "is_required": true,
+                    "has_access": true,
+                    "access_count": 3,
+                    "accesses": [
+                        {"segment_code": "E001", "access_level": "EDIT"},
+                        ...
+                    ]
+                },
+                {
+                    "segment_type_id": 2,
+                    "segment_type_name": "Account",
+                    "is_required": true,
+                    "has_access": false,
+                    "access_count": 0,
+                    "accesses": []
+                },
+                ...
+            ],
+            "missing_required_types": [
+                {"segment_type_id": 2, "segment_type_name": "Account"}
+            ],
+            "assigned_required_types": [
+                {"segment_type_id": 1, "segment_type_name": "Entity"}
+            ]
+        }
+    """
+    permission_classes = [IsAuthenticated]
+    
+    def get(self, request):
+        from account_and_entitys.models import XX_SegmentType
+        
+        try:
+            user_id = request.query_params.get('user_id')
+            
+            # Determine which user to check
+            if user_id:
+                # Admins can check any user
+                if request.user.role not in ['admin', 'superadmin']:
+                    # Non-admins can only check themselves
+                    if str(request.user.id) != str(user_id):
+                        return Response({
+                            'success': False,
+                            'error': 'You can only view your own segment access'
+                        }, status=status.HTTP_403_FORBIDDEN)
+                
+                try:
+                    user = xx_User.objects.get(id=user_id)
+                except xx_User.DoesNotExist:
+                    return Response({
+                        'success': False,
+                        'error': f'User with id {user_id} not found'
+                    }, status=status.HTTP_404_NOT_FOUND)
+            else:
+                # Default to current user
+                user = request.user
+            
+            # Get all required segment types
+            required_types = XX_SegmentType.objects.filter(
+                is_required=True,
+                is_active=True
+            ).order_by('display_order', 'segment_id')
+            
+            required_status = []
+            missing_types = []
+            assigned_types = []
+            all_assigned = True
+            
+            for seg_type in required_types:
+                # Get user's access for this segment type
+                access_result = UserSegmentAccessManager.get_user_allowed_segments(
+                    user=user,
+                    segment_type_id=seg_type.segment_id,
+                    access_level=None,
+                    include_inactive=False
+                )
+                
+                has_access = access_result['success'] and access_result['count'] > 0
+                
+                if has_access:
+                    assigned_types.append({
+                        'segment_type_id': seg_type.segment_id,
+                        'segment_type_name': seg_type.segment_name
+                    })
+                else:
+                    missing_types.append({
+                        'segment_type_id': seg_type.segment_id,
+                        'segment_type_name': seg_type.segment_name
+                    })
+                    all_assigned = False
+                
+                # Build access list with summary
+                accesses_summary = []
+                if has_access:
+                    for seg in access_result['segments'][:10]:  # Limit to first 10
+                        accesses_summary.append({
+                            'segment_code': seg['segment_code'],
+                            'segment_alias': seg.get('segment_alias', ''),
+                            'access_level': seg['access_level']
+                        })
+                
+                required_status.append({
+                    'segment_type_id': seg_type.segment_id,
+                    'segment_type_name': seg_type.segment_name,
+                    'description': seg_type.description,
+                    'is_required': seg_type.is_required,
+                    'has_hierarchy': seg_type.has_hierarchy,
+                    'has_access': has_access,
+                    'access_count': access_result['count'] if access_result['success'] else 0,
+                    'accesses': accesses_summary,
+                    'more_accesses': access_result['count'] > 10 if access_result['success'] else False
+                })
+            
+            return Response({
+                'success': True,
+                'user_id': user.id,
+                'username': user.username,
+                'user_role': user.role,
+                'all_required_segments_assigned': all_assigned,
+                'required_segments_status': required_status,
+                'missing_required_types': missing_types,
+                'assigned_required_types': assigned_types,
+                'total_required_types': len(required_types),
+                'total_missing': len(missing_types),
+                'total_assigned': len(assigned_types)
+            })
+            
+        except Exception as e:
+            return Response({
+                'success': False,
+                'error': str(e)
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+class AssignRequiredSegmentsView(APIView):
+    """
+    Assign segments to a user for ALL required segment types in one request.
+    Validates that all required segment types are covered.
+    
+    POST /api/auth/phase4/required-segments/assign
+    
+    Request Body:
+        {
+            "user_id": 5,
+            "assignments": {
+                "1": ["E001", "E002"],        // segment_type_id: [segment_codes]
+                "2": ["A100", "A200", "A300"],
+                "3": ["P001"]
+            },
+            "access_level": "VIEW",  // Optional, default VIEW
+            "validate_required": true,  // Optional, validate all required types are included
+            "notes": "Initial segment assignment"
+        }
+    
+    Returns:
+        {
+            "success": true,
+            "message": "Required segments assigned successfully",
+            "user_id": 5,
+            "assignments_result": {
+                "1": {"granted": 2, "failed": 0, "segment_codes": ["E001", "E002"]},
+                "2": {"granted": 3, "failed": 0, "segment_codes": ["A100", "A200", "A300"]},
+                "3": {"granted": 1, "failed": 0, "segment_codes": ["P001"]}
+            },
+            "total_granted": 6,
+            "total_failed": 0,
+            "validation": {
+                "all_required_covered": true,
+                "missing_required_types": []
+            }
+        }
+    """
+    permission_classes = [IsAuthenticated, IsSuperAdmin]
+    
+    def post(self, request):
+        from account_and_entitys.models import XX_SegmentType, XX_Segment
+        
+        try:
+            user_id = request.data.get('user_id')
+            assignments = request.data.get('assignments', {})
+            access_level = request.data.get('access_level', 'VIEW')
+            validate_required = request.data.get('validate_required', True)
+            notes = request.data.get('notes', '')
+            
+            # Validate required fields
+            if not user_id:
+                return Response({
+                    'success': False,
+                    'error': 'user_id is required'
+                }, status=status.HTTP_400_BAD_REQUEST)
+            
+            if not assignments:
+                return Response({
+                    'success': False,
+                    'error': 'assignments is required (dict of segment_type_id: [segment_codes])'
+                }, status=status.HTTP_400_BAD_REQUEST)
+            
+            # Get user
+            try:
+                user = xx_User.objects.get(id=user_id)
+            except xx_User.DoesNotExist:
+                return Response({
+                    'success': False,
+                    'error': f'User with id {user_id} not found'
+                }, status=status.HTTP_404_NOT_FOUND)
+            
+            # Validate access level
+            valid_levels = ['VIEW', 'EDIT', 'APPROVE', 'ADMIN']
+            if access_level not in valid_levels:
+                return Response({
+                    'success': False,
+                    'error': f'Invalid access_level. Must be one of: {valid_levels}'
+                }, status=status.HTTP_400_BAD_REQUEST)
+            
+            # Check if all required segment types are covered
+            missing_required = []
+            if validate_required:
+                required_types = XX_SegmentType.objects.filter(
+                    is_required=True,
+                    is_active=True
+                ).values_list('segment_id', flat=True)
+                
+                assignment_type_ids = set(int(k) for k in assignments.keys())
+                for req_type_id in required_types:
+                    if req_type_id not in assignment_type_ids:
+                        req_type = XX_SegmentType.objects.get(segment_id=req_type_id)
+                        missing_required.append({
+                            'segment_type_id': req_type_id,
+                            'segment_type_name': req_type.segment_name
+                        })
+                
+                # If there are missing required types, return error (unless user explicitly skips)
+                if missing_required:
+                    return Response({
+                        'success': False,
+                        'error': 'Not all required segment types are included in assignments',
+                        'missing_required_types': missing_required,
+                        'hint': 'Set validate_required=false to skip this check'
+                    }, status=status.HTTP_400_BAD_REQUEST)
+            
+            # Process assignments
+            assignments_result = {}
+            total_granted = 0
+            total_failed = 0
+            errors = []
+            
+            for segment_type_id, segment_codes in assignments.items():
+                segment_type_id = int(segment_type_id)
+                
+                # Validate segment type exists
+                try:
+                    segment_type = XX_SegmentType.objects.get(segment_id=segment_type_id, is_active=True)
+                except XX_SegmentType.DoesNotExist:
+                    errors.append(f"Segment type {segment_type_id} not found")
+                    continue
+                
+                type_granted = 0
+                type_failed = 0
+                type_errors = []
+                
+                # Ensure segment_codes is a list
+                if isinstance(segment_codes, str):
+                    segment_codes = [segment_codes]
+                
+                for code in segment_codes:
+                    # Grant access for each segment
+                    result = UserSegmentAccessManager.grant_access(
+                        user=user,
+                        segment_type_id=segment_type_id,
+                        segment_code=code,
+                        access_level=access_level,
+                        granted_by=request.user,
+                        notes=notes
+                    )
+                    
+                    if result['success']:
+                        type_granted += 1
+                        total_granted += 1
+                    else:
+                        type_failed += 1
+                        total_failed += 1
+                        type_errors.extend(result.get('errors', []))
+                
+                assignments_result[segment_type_id] = {
+                    'segment_type_name': segment_type.segment_name,
+                    'granted': type_granted,
+                    'failed': type_failed,
+                    'segment_codes': segment_codes,
+                    'errors': type_errors if type_errors else None
+                }
+            
+            success = total_failed == 0
+            
+            return Response({
+                'success': success,
+                'message': 'Required segments assigned successfully' if success else 'Some assignments failed',
+                'user_id': user.id,
+                'username': user.username,
+                'access_level': access_level,
+                'assignments_result': assignments_result,
+                'total_granted': total_granted,
+                'total_failed': total_failed,
+                'validation': {
+                    'all_required_covered': len(missing_required) == 0,
+                    'missing_required_types': missing_required
+                },
+                'errors': errors if errors else None
+            }, status=status.HTTP_200_OK if success else status.HTTP_207_MULTI_STATUS)
+            
+        except Exception as e:
+            return Response({
+                'success': False,
+                'error': str(e)
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+class UserAvailableSegmentsView(APIView):
+    """
+    Get all available segments for assignment to a user, grouped by segment type.
+    Shows which segments the user already has access to vs which are available.
+    
+    GET /api/auth/phase4/required-segments/available
+    
+    Query Parameters:
+        - user_id (int): User ID to check available segments for
+        - segment_type_id (int): Optional filter by specific segment type
+        - required_only (bool): If true, only show required segment types (default: true)
+    
+    Returns:
+        {
+            "success": true,
+            "user_id": 5,
+            "segment_types": [
+                {
+                    "segment_type_id": 1,
+                    "segment_type_name": "Entity",
+                    "is_required": true,
+                    "total_segments": 50,
+                    "user_has_access_to": 3,
+                    "available_segments": [
+                        {"code": "E003", "alias": "Finance Dept", "already_assigned": false},
+                        {"code": "E004", "alias": "IT Dept", "already_assigned": false},
+                        ...
+                    ],
+                    "assigned_segments": [
+                        {"code": "E001", "alias": "HR Dept", "access_level": "EDIT"},
+                        {"code": "E002", "alias": "Operations", "access_level": "VIEW"},
+                        ...
+                    ]
+                },
+                ...
+            ]
+        }
+    """
+    permission_classes = [IsAuthenticated, IsSuperAdmin]
+    
+    def get(self, request):
+        from account_and_entitys.models import XX_SegmentType, XX_Segment
+        
+        try:
+            user_id = request.query_params.get('user_id')
+            segment_type_id = request.query_params.get('segment_type_id')
+            required_only = request.query_params.get('required_only', 'true').lower() == 'true'
+            
+            if not user_id:
+                return Response({
+                    'success': False,
+                    'error': 'user_id is required'
+                }, status=status.HTTP_400_BAD_REQUEST)
+            
+            # Get user
+            try:
+                user = xx_User.objects.get(id=user_id)
+            except xx_User.DoesNotExist:
+                return Response({
+                    'success': False,
+                    'error': f'User with id {user_id} not found'
+                }, status=status.HTTP_404_NOT_FOUND)
+            
+            # Build segment types query
+            seg_types_query = XX_SegmentType.objects.filter(is_active=True)
+            
+            if required_only:
+                seg_types_query = seg_types_query.filter(is_required=True)
+            
+            if segment_type_id:
+                seg_types_query = seg_types_query.filter(segment_id=segment_type_id)
+            
+            seg_types_query = seg_types_query.order_by('display_order', 'segment_id')
+            
+            segment_types_data = []
+            
+            for seg_type in seg_types_query:
+                # Get all segments for this type
+                all_segments = XX_Segment.objects.filter(
+                    segment_type=seg_type,
+                    is_active=True
+                ).order_by('code')
+                
+                # Get user's assigned segments for this type
+                access_result = UserSegmentAccessManager.get_user_allowed_segments(
+                    user=user,
+                    segment_type_id=seg_type.segment_id,
+                    include_inactive=False
+                )
+                
+                assigned_codes = {}
+                if access_result['success']:
+                    for seg in access_result['segments']:
+                        assigned_codes[seg['segment_code']] = seg['access_level']
+                
+                available_segments = []
+                assigned_segments = []
+                
+                for seg in all_segments:
+                    if seg.code in assigned_codes:
+                        assigned_segments.append({
+                            'code': seg.code,
+                            'alias': seg.alias or '',
+                            'access_level': assigned_codes[seg.code],
+                            'level': seg.level,
+                            'parent_code': seg.parent_code
+                        })
+                    else:
+                        available_segments.append({
+                            'code': seg.code,
+                            'alias': seg.alias or '',
+                            'already_assigned': False,
+                            'level': seg.level,
+                            'parent_code': seg.parent_code
+                        })
+                
+                segment_types_data.append({
+                    'segment_type_id': seg_type.segment_id,
+                    'segment_type_name': seg_type.segment_name,
+                    'is_required': seg_type.is_required,
+                    'has_hierarchy': seg_type.has_hierarchy,
+                    'total_segments': all_segments.count(),
+                    'user_has_access_to': len(assigned_codes),
+                    'available_count': len(available_segments),
+                    'available_segments': available_segments,
+                    'assigned_segments': assigned_segments
+                })
+            
+            return Response({
+                'success': True,
+                'user_id': user.id,
+                'username': user.username,
+                'segment_types': segment_types_data,
+                'total_segment_types': len(segment_types_data)
+            })
+            
+        except Exception as e:
+            return Response({
+                'success': False,
+                'error': str(e)
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+class MySegmentsView(APIView):
+    """
+    Get current user's own segment access across all segment types.
+    This is a user-friendly endpoint for regular users to see their own access.
+    
+    GET /api/auth/phase4/my-segments
+    
+    Returns:
+        {
+            "success": true,
+            "user_id": 5,
+            "username": "john_doe",
+            "segment_access": [
+                {
+                    "segment_type_id": 1,
+                    "segment_type_name": "Entity",
+                    "is_required": true,
+                    "segments": [
+                        {"code": "E001", "alias": "HR Dept", "access_level": "EDIT"},
+                        {"code": "E002", "alias": "Finance", "access_level": "VIEW"}
+                    ]
+                },
+                ...
+            ],
+            "summary": {
+                "total_segment_types_with_access": 3,
+                "total_segments_assigned": 10,
+                "missing_required_types": []
+            }
+        }
+    """
+    permission_classes = [IsAuthenticated]
+    
+    def get(self, request):
+        from account_and_entitys.models import XX_SegmentType
+        
+        try:
+            user = request.user
+            
+            # Get all segment types
+            all_types = XX_SegmentType.objects.filter(
+                is_active=True
+            ).order_by('display_order', 'segment_id')
+            
+            segment_access = []
+            total_segments = 0
+            types_with_access = 0
+            missing_required = []
+            
+            for seg_type in all_types:
+                access_result = UserSegmentAccessManager.get_user_allowed_segments(
+                    user=user,
+                    segment_type_id=seg_type.segment_id,
+                    include_inactive=False
+                )
+                
+                if access_result['success'] and access_result['count'] > 0:
+                    types_with_access += 1
+                    total_segments += access_result['count']
+                    
+                    segments_list = []
+                    for seg in access_result['segments']:
+                        segments_list.append({
+                            'code': seg['segment_code'],
+                            'alias': seg.get('segment_alias', ''),
+                            'access_level': seg['access_level']
+                        })
+                    
+                    segment_access.append({
+                        'segment_type_id': seg_type.segment_id,
+                        'segment_type_name': seg_type.segment_name,
+                        'is_required': seg_type.is_required,
+                        'segment_count': access_result['count'],
+                        'segments': segments_list
+                    })
+                elif seg_type.is_required:
+                    missing_required.append({
+                        'segment_type_id': seg_type.segment_id,
+                        'segment_type_name': seg_type.segment_name
+                    })
+            
+            return Response({
+                'success': True,
+                'user_id': user.id,
+                'username': user.username,
+                'role': user.role,
+                'segment_access': segment_access,
+                'summary': {
+                    'total_segment_types_with_access': types_with_access,
+                    'total_segments_assigned': total_segments,
+                    'all_required_assigned': len(missing_required) == 0,
+                    'missing_required_types': missing_required
+                }
+            })
+            
+        except Exception as e:
+            return Response({
+                'success': False,
+                'error': str(e)
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)

@@ -271,6 +271,131 @@ def validate_something(data):
 
 ---
 
+## User Segment Access Control (Phase 4)
+
+Users can be assigned access to specific segments, and the segment listing API respects these assignments.
+
+### Access Control Behavior
+
+- **SuperAdmin users**: See ALL segments (can bypass filter with `bypass_access_filter=true`)
+- **Admin/Regular users**: Only see segments they have been granted access to via `XX_UserSegmentAccess`
+- **No access**: Users without any segment grants see an empty list
+
+### Key Models
+```python
+XX_UserSegmentAccess:  # User-to-segment access grants
+    - user: FK to xx_User
+    - segment_type: FK to XX_SegmentType
+    - segment: FK to XX_Segment
+    - access_level: VIEW/EDIT/APPROVE/ADMIN
+    - is_active: bool
+```
+
+### API Endpoints for User Segment Management
+
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/api/auth/phase4/required-segments/types` | GET | Get all required segment types |
+| `/api/auth/phase4/required-segments/user-status` | GET | Check user's segment access status |
+| `/api/auth/phase4/required-segments/assign` | POST | Bulk assign segments to user |
+| `/api/auth/phase4/required-segments/available` | GET | Get available segments for assignment |
+| `/api/auth/phase4/my-segments` | GET | Get current user's own segment access |
+
+### Assigning Segments to Users
+
+**Bulk Assignment** (preferred for initial setup):
+```json
+POST /api/auth/phase4/required-segments/assign
+{
+    "user_id": 5,
+    "assignments": {
+        "1": ["E001", "E002"],     // Entity segment type
+        "2": ["A100", "A200"],     // Account segment type  
+        "3": ["P001"]              // Project segment type
+    },
+    "access_level": "VIEW",
+    "validate_required": true,
+    "notes": "Initial access setup"
+}
+```
+
+**Single Grant**:
+```json
+POST /api/auth/phase4/access/grant
+{
+    "user_id": 5,
+    "segment_type_id": 1,
+    "segment_code": "E001",
+    "access_level": "EDIT",
+    "notes": "Department manager access"
+}
+```
+
+### Required Segments
+
+When `is_required=true` on `XX_SegmentType`, the system can validate that users have access to at least one segment of each required type:
+
+```json
+GET /api/auth/phase4/required-segments/user-status?user_id=5
+
+Response:
+{
+    "all_required_segments_assigned": false,
+    "missing_required_types": [
+        {"segment_type_id": 2, "segment_type_name": "Account"}
+    ]
+}
+```
+
+### Segment List Filtering
+
+The `SegmentListView` now includes access control:
+
+```json
+GET /api/account-entitys/segments/list?segment_type=1
+
+Response (for non-superadmin):
+{
+    "data": [...],  // Only user's assigned segments
+    "access_control": {
+        "user_is_superadmin": false,
+        "access_filter_applied": true,
+        "user_allowed_segments_count": 3
+    }
+}
+```
+
+### Manager Class Usage
+
+```python
+from user_management.managers import UserSegmentAccessManager
+
+# Grant access
+result = UserSegmentAccessManager.grant_access(
+    user=user,
+    segment_type_id=1,
+    segment_code='E001',
+    access_level='EDIT',
+    granted_by=admin_user
+)
+
+# Check access
+check = UserSegmentAccessManager.check_user_has_access(
+    user=user,
+    segment_type_id=1,
+    segment_code='E001',
+    required_level='VIEW'
+)
+
+# Get user's allowed segments
+allowed = UserSegmentAccessManager.get_user_allowed_segments(
+    user=user,
+    segment_type_id=1
+)
+```
+
+---
+
 ## Migration from Hardcoded to Dynamic
 
 **Never edit hardcoded fields directly** (`cost_center_code`, `account_code`, `project_code`). Instead:

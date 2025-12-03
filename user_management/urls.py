@@ -22,6 +22,12 @@ from .phase4_views import (
     UserAbilitiesGetView,
     UsersWithAbilityView,
     ValidateAbilityForOperationView,
+    # Required segment assignment views
+    RequiredSegmentTypesView,
+    UserRequiredSegmentsStatusView,
+    AssignRequiredSegmentsView,
+    UserAvailableSegmentsView,
+    MySegmentsView,
 )
 
 app_name = 'user_management'
@@ -77,6 +83,13 @@ urlpatterns = [
     path("phase4/abilities/user-abilities", UserAbilitiesGetView.as_view(), name="phase4-user-abilities"),
     path("phase4/abilities/users-with-ability", UsersWithAbilityView.as_view(), name="phase4-users-with-ability"),
     path("phase4/abilities/validate-operation", ValidateAbilityForOperationView.as_view(), name="phase4-validate-operation"),
+    
+    # Required Segment Assignment endpoints (User-to-Segment Access Control)
+    path("phase4/required-segments/types", RequiredSegmentTypesView.as_view(), name="phase4-required-segment-types"),
+    path("phase4/required-segments/user-status", UserRequiredSegmentsStatusView.as_view(), name="phase4-user-required-status"),
+    path("phase4/required-segments/assign", AssignRequiredSegmentsView.as_view(), name="phase4-assign-required-segments"),
+    path("phase4/required-segments/available", UserAvailableSegmentsView.as_view(), name="phase4-available-segments"),
+    path("phase4/my-segments", MySegmentsView.as_view(), name="phase4-my-segments"),
     
     # path("chatbot/bot/", testChatbot.as_view(), name="chatbot"),
     # Notification management endpoints
