@@ -29,40 +29,10 @@ class xx_BudgetTransfer(models.Model):
         null=True, blank=True
     )  # Keep as TextField but avoid in complex queries
     code = models.CharField(max_length=10, null=True, blank=True)
-    gl_posting_status = models.CharField(
-        max_length=50, null=True, blank=True
-    )  # Changed from EncryptedCharField
-    approvel_1 = models.CharField(
-        max_length=100, null=True, blank=True
-    )  # Changed from EncryptedCharField
-    approvel_2 = models.CharField(
-        max_length=100, null=True, blank=True
-    )  # Changed from EncryptedCharField
-    approvel_3 = models.CharField(
-        max_length=100, null=True, blank=True
-    )  # Changed from EncryptedCharField
-    approvel_4 = models.CharField(
-        max_length=100, null=True, blank=True
-    )  # Changed from EncryptedCharField
-    approvel_1_date = models.DateTimeField(
-        null=True, blank=True
-    )  # Changed from EncryptedDateTimeField
-    approvel_2_date = models.DateTimeField(
-        null=True, blank=True
-    )  # Changed from EncryptedDateTimeField
-    approvel_3_date = models.DateTimeField(
-        null=True, blank=True
-    )  # Changed from EncryptedDateTimeField
-    approvel_4_date = models.DateTimeField(
-        null=True, blank=True
-    )  # Changed from EncryptedDateTimeField
+   
     status_level = models.IntegerField(default=1)
-    attachment = models.CharField(
-        max_length=10, null=True, blank=True, default="No"
-    )  # Changed from EncryptedCharField
-    fy = models.IntegerField(
-        null=True, blank=True
-    )  # Changed from EncryptedIntegerField
+    attachment = models.CharField(max_length=10, null=True, blank=True, default="No")  # Changed from EncryptedCharField
+    fy = models.IntegerField(null=True, blank=True)  # Changed from EncryptedIntegerField
     group_id = models.IntegerField(null=True, blank=True)
     interface_id = models.IntegerField(null=True, blank=True)
     reject_group_id = models.IntegerField(null=True, blank=True)
@@ -81,6 +51,8 @@ class xx_BudgetTransfer(models.Model):
     transfer_type= models.CharField(
         max_length=50, null=True, blank=True
     )  # Changed from EncryptedCharField
+    linked_transfer_id = models.IntegerField(null=True, blank=True)
+
     class Meta:
         db_table = "XX_BUDGET_TRANSFER_XX"
 

@@ -105,12 +105,23 @@ class CreateBudgetTransferView(APIView):
                 },
                 status=status.HTTP_400_BAD_REQUEST,
             )
+        linked_budget_transfer = request.data.get("source_transaction_id")
+        budget=None
+        transfers=None
+        if linked_budget_transfer:
+             budget=xx_BudgetTransfer.objects.filter(transaction_id=linked_budget_transfer).first()
+             if budget:
+                    linked_budget_transfer=budget.transaction_id
+                    transfers=xx_TransactionTransfer.objects.filter(transaction_id=budget.transaction_id)
+                 
+                 
+
 
         type = request.data.get("type").upper()
         transfer_control_budget = request.data.get("budget_control", "")
         transfer_type=request.data.get("transfer_type","")
 
-        if type in ["FAR", "AFR", "FAD", "DFR"]:
+        if type in ["FAR", "AFR", "FAD", "DFR","HFR"]:
             prefix = f"{type}-"
         else:
 
@@ -148,6 +159,37 @@ class CreateBudgetTransferView(APIView):
                 control_budget=transfer_control_budget,
                 transfer_type=transfer_type,
             )
+            if linked_budget_transfer:
+                from account_and_entitys.models import XX_TransactionSegment
+                
+                for transfer_item in transfers:
+                    # Create new transaction transfer with all fields from source
+                    new_transfer = xx_TransactionTransfer.objects.create(
+                        transaction=transfer,
+                        from_center=transfer_item.from_center,
+                        to_center=transfer_item.to_center,
+                        reason=transfer_item.reason,
+                        account_code=transfer_item.account_code,
+                        account_name=transfer_item.account_name,
+                        project_code=transfer_item.project_code,
+                        project_name=transfer_item.project_name,
+                        cost_center_code=transfer_item.cost_center_code,
+                        cost_center_name=transfer_item.cost_center_name,
+                    )
+                    
+                    # Copy transaction segments (from and to)
+                    source_segments = XX_TransactionSegment.objects.filter(
+                        transaction_transfer=transfer_item
+                    ).select_related('segment_type', 'segment_value', 'from_segment_value', 'to_segment_value')
+                    
+                    for segment in source_segments:
+                        XX_TransactionSegment.objects.create(
+                            transaction_transfer=new_transfer,
+                            segment_type=segment.segment_type,
+                            segment_value=segment.segment_value,
+                            from_segment_value=segment.from_segment_value,
+                            to_segment_value=segment.to_segment_value,
+                        )
             Notification_object = xx_notification.objects.create(
                 user_id=request.user.id,
                 message=f"New budget transfer request created with code {new_code}",
@@ -742,19 +784,21 @@ class transcationtransferapprovel_reject(APIView):
                     # for transfer in trasfers:
                     try:
                         # Update the pivot fund
+                        if trasncation.code[0:3] != "HFR":
 
-                        if Status == "approved" :
-                            # Queue background task for Oracle upload
-                            print(f"Queuing budget upload task for transaction {transaction_id}")
-                            upload_budget_to_oracle.delay(
-                                transaction_id=transaction_id,
-                                entry_type="Approve"
-                            )
-                            results.append({
-                                "transaction_id": transaction_id,
-                                "status": "success",
-                                "message": "Transaction approved successfully"
-                        })
+                            if Status == "approved" :
+                                # Queue background task for Oracle upload
+                                print(f"Queuing budget upload task for transaction {transaction_id}")
+                                upload_budget_to_oracle.delay(
+                                    transaction_id=transaction_id,
+                                    entry_type="Approve"
+                                )
+                                results.append({
+                                    "transaction_id": transaction_id,
+                                    "status": "success",
+                                    "message": "Transaction approved successfully"
+                            })
+                            
                         if Status == "rejected":
                             print(f"Queuing journal upload task for transaction {transaction_id}")
                             upload_journal_to_oracle.delay(

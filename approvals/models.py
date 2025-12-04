@@ -28,6 +28,7 @@ class ApprovalWorkflowTemplate(models.Model):
 		("AFR", "AFR"),
 		("FAD", "FAD"),
 		("DFR", "DFR"),
+		("HFR", "HFR"),
 		("GEN", "Generic"),  # fallback / future
 	]
 

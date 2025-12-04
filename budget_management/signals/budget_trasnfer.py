@@ -84,7 +84,7 @@ def Run_oracle_upload_journal_workflow(sender, instance, created, **kwargs):
             )
             
             # Check if code requires Oracle upload
-            if instance.code and instance.code[0:3] == "FAR":
+            if instance.code and instance.code[0:3] == "FAR" or instance.code[0:3] == "HFR":
                 # Queue the task in Celery (runs in background)
                 upload_journal_to_oracle.delay(
                     transaction_id=instance.transaction_id,

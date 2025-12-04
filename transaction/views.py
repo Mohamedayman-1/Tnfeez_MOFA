@@ -514,19 +514,6 @@ class TransactionTransferCreateView(APIView):
                             "error": serializer.errors,
                             "data": transfer_data,
                         })
-                else:
-                    # LEGACY FORMAT: Backward compatibility
-                    serializer = TransactionTransferSerializer(data=transfer_data)
-                    if serializer.is_valid():
-                        transfer = serializer.save()
-                        results.append(serializer.data)
-                    else:
-                        results.append({
-                            "index": index,
-                            "error": serializer.errors,
-                            "data": transfer_data,
-                        })
-
             return Response(results, status=status.HTTP_207_MULTI_STATUS)
         
         else:
@@ -568,45 +555,6 @@ class TransactionTransferCreateView(APIView):
                             {"error": str(e)},
                             status=status.HTTP_400_BAD_REQUEST
                         )
-                else:
-                    return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
-            else:
-                # LEGACY FORMAT: Backward compatibility
-                transfer_data = request.data
-                from_center = transfer_data.get("from_center")
-                if from_center is None or str(from_center).strip() == "":
-                    from_center = 0
-                to_center = transfer_data.get("to_center")
-                if to_center is None or str(to_center).strip() == "":
-                    to_center = 0
-                cost_center_code = transfer_data.get("cost_center_code")
-                account_code = transfer_data.get("account_code")
-                project_code = transfer_data.get("project_code")
-                transfer_id = transfer_data.get("transfer_id")
-                approved_budget = transfer_data.get("approved_budget")
-                available_budget = transfer_data.get("available_budget")
-                encumbrance = transfer_data.get("encumbrance")
-                actual = transfer_data.get("actual")
-
-                # Prepare data for validation function
-                validation_data = {
-                    "transaction_id": transaction_id,
-                    "from_center": from_center,
-                    "to_center": to_center,
-                    "approved_budget": approved_budget,
-                    "available_budget": available_budget,
-                    "encumbrance": encumbrance,
-                    "actual": actual,
-                    "cost_center_code": cost_center_code,
-                    "account_code": account_code,
-                    "project_code": project_code,
-                    "transfer_id": transfer_id,
-                }
-
-                serializer = TransactionTransferSerializer(data=validation_data)
-                if serializer.is_valid():
-                    serializer.save()
-                    return Response(serializer.data, status=status.HTTP_201_CREATED)
                 else:
                     return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
@@ -1016,13 +964,21 @@ class TransactionTransferListView(APIView):
             # Only update amount if balanced AND there are at least 2 transfers
             # (single transfer can't be balanced since it only has from OR to, not both)
             transfer_count = all_related_transfers.count()
-            if transfer_count >= 2 and total_from_center == total_to_center:
+            if transfer_count >= 2 and total_from_center == total_to_center and transaction_object.code[0:3] != "FAR":
                 transaction_object.amount = total_from_center
                 xx_BudgetTransfer.objects.filter(pk=transaction_id).update(
                     amount=total_from_center
                 )
+            elif transaction_object.code[0:3] != "FAR":
+                if total_from_center > 0:
+                    transaction_object.amount = total_from_center
+                else:
+                    transaction_object.amount = total_to_center
+                xx_BudgetTransfer.objects.filter(pk=transaction_id).update(
+                    amount=0
+                )
 
-            if transaction_object.code[0:3] == "AFR" or transaction_object.code[0:3] == "DFR":
+            if transaction_object.code[0:3] == "AFR" or transaction_object.code[0:3] == "DFR" or transaction_object.code[0:3] == "HFR":
                 summary = {
                     "transaction_id": transaction_id,
                     "total_transfers": len(response_data),
