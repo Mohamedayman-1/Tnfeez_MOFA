@@ -158,6 +158,7 @@ class CreateBudgetTransferView(APIView):
                 code=new_code,
                 control_budget=transfer_control_budget,
                 transfer_type=transfer_type,
+                linked_transfer_id=linked_budget_transfer
             )
             if linked_budget_transfer:
                 from account_and_entitys.models import XX_TransactionSegment
