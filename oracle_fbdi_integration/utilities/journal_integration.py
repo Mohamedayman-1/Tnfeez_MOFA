@@ -51,7 +51,12 @@ def create_and_upload_journal(transfers, transaction_id: int, entry_type: str = 
     group_id = group_id.replace('_', '')
 
     # Create journal entry data
-    journal_data = create_journal_entry_data(transfers, transaction_id, entry_type, group_id)
+    journal_data,Status = create_journal_entry_data(transfers, transaction_id, entry_type, group_id)
+    if Status==False:
+        return {
+            "success": True,
+            "massage": "No journal entries to create because the total from are already in balance.",
+        }, None
 
     # Initialize template manager and create journal
     manager = JournalTemplateManager(str(template_path))

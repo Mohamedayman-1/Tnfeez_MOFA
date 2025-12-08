@@ -16,6 +16,7 @@ from openpyxl import load_workbook
 from budget_management.models import xx_BudgetTransfer
 from oracle_fbdi_integration.core.file_utils import excel_to_csv_and_zip
 from account_and_entitys.oracle import OracleSegmentMapper
+from transaction.models import xx_TransactionTransfer
 
 
 class JournalTemplateManager:
@@ -221,6 +222,7 @@ def create_journal_entry_data(
         total_debit += getattr(transfer, "from_center", 0) or 0
 
     budget_trasnfer=xx_BudgetTransfer.objects.get(transaction_id=transaction_id)
+    linked_transfer=budget_trasnfer.linked_transfer_id
 
 
     # Create journal lines for each transfer (FROM side - debit entries)
@@ -236,9 +238,74 @@ def create_journal_entry_data(
     print(f"journal_catgoray: {journal_catgoray}")
 
     batch_name = f"BATCH_{journal_catgoray}_{timestamp}_TXN_{transaction_id}"
+    
+    # Pre-fetch linked transfer segments and amounts if linked_transfer exists
+    linked_transfer_data = {}
+    if linked_transfer is not None and budget_trasnfer.code[0:3] == "FAR":
+        from account_and_entitys.models import XX_TransactionSegment
+        linked_transfers_list = xx_TransactionTransfer.objects.filter(transaction=linked_transfer)
+        for linked_trans in linked_transfers_list:
+            # Get all segments for this linked transfer
+            segments = XX_TransactionSegment.objects.filter(
+                transaction_transfer=linked_trans
+            ).select_related('segment_type', 'from_segment_value', 'to_segment_value')
+            
+            # Build segment key (tuple of all segment codes) to match transfers
+            segment_key = tuple(
+                (seg.segment_type_id, seg.from_segment_value.code if seg.from_segment_value else None)
+                for seg in segments.order_by('segment_type_id')
+            )
+            
+            linked_transfer_data[segment_key] = {
+                'from_center': linked_trans.from_center,
+                'to_center': linked_trans.to_center,
+                'transfer': linked_trans
+            }
+    
     for transfer in transfers:
-        from_amount = getattr(transfer, "from_center", 0) or 0
-        if from_amount > 0:
+        # Check if this transfer has a matching linked transfer
+        linked_from_amount = 0
+        current_from_amount = getattr(transfer, "from_center", 0) or 0
+        has_linked_match = False
+        
+        if linked_transfer is not None and linked_transfer_data:
+            from account_and_entitys.models import XX_TransactionSegment
+            current_segments = XX_TransactionSegment.objects.filter(
+                transaction_transfer=transfer
+            ).select_related('segment_type', 'from_segment_value', 'to_segment_value')
+            
+            # Build segment key for current transfer
+            current_segment_key = tuple(
+                (seg.segment_type_id, seg.from_segment_value.code if seg.from_segment_value else None)
+                for seg in current_segments.order_by('segment_type_id')
+            )
+            
+            # Find matching linked transfer by segment combination
+            if current_segment_key in linked_transfer_data:
+                linked_data = linked_transfer_data[current_segment_key]
+                linked_from_amount = linked_data['from_center'] or 0
+                has_linked_match = True
+                
+                print(f"Transfer {transfer.transfer_id} - Current: {current_from_amount}, Linked: {linked_from_amount}")
+        
+        # Determine debit and credit amounts based on linked transfer
+        if has_linked_match:
+            # DEBIT is always the current amount
+            debit_amount = current_from_amount
+            
+            # CREDIT is the minimum of current and linked (the amount that matches/cancels)
+            credit_amount = min(current_from_amount, linked_from_amount)
+            
+            # Adjust total_debit: subtract the credit (which cancels part of debit)
+            # Net effect = current - min(current, linked)
+            total_debit = total_debit - credit_amount
+        else:
+            # No linked match - use full amount as debit
+            debit_amount = current_from_amount
+            credit_amount = 0
+        
+        if debit_amount > 0:
+            # Create DEBIT entry
             journal_entry = {
                 "Status Code": "NEW",
                 "Ledger ID": LEDGER_ID,
@@ -248,8 +315,8 @@ def create_journal_entry_data(
                 "Currency Code": CURRENCY_CODE,
                 "Journal Entry Creation Date": time.strftime("%Y-%m-%d"),
                 "Actual Flag": "E",
-                "Entered Debit Amount": from_amount if entry_type == "submit" else "",
-                "Entered Credit Amount": from_amount if entry_type == "reject" else "",
+                "Entered Debit Amount": debit_amount if entry_type == "submit" else "",
+                "Entered Credit Amount": debit_amount if entry_type == "reject" else "",
                 "REFERENCE1 (Batch Name)": batch_name,
                 "REFERENCE2 (Batch Description)": batch_description,
                 "REFERENCE4 (Journal Entry Name)": journal_name,
@@ -258,13 +325,41 @@ def create_journal_entry_data(
                 "Encumbrance Type ID": ENCUMBRANCE_TYPE_ID,
                 "Interface Group Identifier": group_id,
             }
-            print("fill_all")
             segment_data = mapper.build_fbdi_row(
                 transaction_transfer=transfer,
                 base_row=journal_entry,
                 fill_all=True
             )
             sample_data.append(segment_data)
+        
+        # If there's a linked match, create CREDIT entry for the same segment
+        if has_linked_match and credit_amount > 0:
+            credit_entry = {
+                "Status Code": "NEW",
+                "Ledger ID": LEDGER_ID,
+                "Effective Date of Transaction": ORACLE_EFFECTIVE_DATE,
+                "Journal Source": ORACLE_JOURNAL_SOURCE,
+                "Journal Category": journal_catgoray,
+                "Currency Code": CURRENCY_CODE,
+                "Journal Entry Creation Date": time.strftime("%Y-%m-%d"),
+                "Actual Flag": "E",
+                "Entered Debit Amount": credit_amount if entry_type == "reject" else "",
+                "Entered Credit Amount": credit_amount if entry_type == "submit" else "",
+                "REFERENCE1 (Batch Name)": batch_name,
+                "REFERENCE2 (Batch Description)": batch_description,
+                "REFERENCE4 (Journal Entry Name)": journal_name,
+                "REFERENCE5 (Journal Entry Description)": journal_description,
+                "REFERENCE10 (Journal Entry Line Description)": f"Credit for linked transfer - transaction {transfer.transaction_id} transfer line {transfer.transfer_id}",
+                "Encumbrance Type ID": ENCUMBRANCE_TYPE_ID,
+                "Interface Group Identifier": group_id,
+            }
+            # Use same segments as the debit entry
+            credit_segment_data = mapper.build_fbdi_row(
+                transaction_transfer=transfer,
+                base_row=credit_entry,
+                fill_all=True
+            )
+            sample_data.append(credit_segment_data)
 
     if total_debit > 0 and transfers:
         
@@ -311,10 +406,9 @@ def create_journal_entry_data(
             offsetting_entry[f"Segment{i}"] = ""
         
         offsetting_with_segments = offsetting_entry
-    
-    sample_data.append(offsetting_with_segments)
+        sample_data.append(offsetting_with_segments)
 
-    return sample_data
+    return sample_data, True 
 
 
 def create_custom_journal_entry(
