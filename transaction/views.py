@@ -992,8 +992,116 @@ class TransactionTransferListView(APIView):
                     "control_budget":budget.control_budget,
                     "notes":budget.notes,
                     "transfer_type":budget.transfer_type,
-
                 }
+                
+                # ========== HFR-Specific Logic: Track Usage History ==========
+                if transaction_object.code[0:3] == "HFR":
+                    # Get all HFR transfer lines (each with different segment combinations)
+                    hfr_transfers = xx_TransactionTransfer.objects.filter(transaction_id=transaction_id)
+                    
+                    # Track usage per segment combination
+                    segment_usage = []
+                    overall_total_used = Decimal('0.00')
+                    overall_original_hold = Decimal('0.00')
+                    
+                    for hfr_transfer in hfr_transfers:
+                        # Get this transfer line's original hold amount
+                        original_amount = Decimal(str(hfr_transfer.from_center)) if hfr_transfer.from_center else Decimal('0.00')
+                        overall_original_hold += original_amount
+                        
+                        # Get segment combination for this transfer line with full details
+                        hfr_segments = hfr_transfer.get_segments_dict()
+                        
+                        # Build structured segment details
+                        segment_details = {}
+                        for seg_id, seg_info in hfr_segments.items():
+                            segment_details[seg_id] = {
+                                "segment_name": seg_info.get('segment_name', ''),
+                                "segment_type": seg_info.get('segment_type', ''),
+                                "from_code": seg_info.get('from_code'),
+                                "from_alias": seg_info.get('from_alias'),
+                                "to_code": seg_info.get('to_code'),
+                                "to_alias": seg_info.get('to_alias')
+                            }
+                        
+                        # Find all FAR transfers that match this HFR's segment combination
+                        linked_far_transfers = xx_BudgetTransfer.objects.filter(
+                            linked_transfer_id=transaction_id,
+                            code__startswith="FAR"
+                        ).order_by('request_date')
+                        
+                        # Calculate usage for this specific segment combination
+                        segment_total_used = Decimal('0.00')
+                        far_usage_details = []
+                        
+                        for far_transfer in linked_far_transfers:
+                            # Get FAR transfer lines
+                            far_transfer_lines = xx_TransactionTransfer.objects.filter(transaction_id=far_transfer.transaction_id)
+                            
+                            # Check each FAR line to see if it matches this HFR segment combination
+                            for far_line in far_transfer_lines:
+                                far_segments = far_line.get_segments_dict()
+                                
+                                # Compare segments (check if FROM segments of FAR match FROM segments of HFR)
+                                segments_match = True
+                                for seg_id in hfr_segments.keys():
+                                    hfr_code = hfr_segments.get(seg_id, {}).get('from_code', '')
+                                    far_code = far_segments.get(seg_id, {}).get('from_code', '')
+                                    if hfr_code != far_code:
+                                        segments_match = False
+                                        break
+                                
+                                # If segments match, count this FAR line's usage
+                                if segments_match:
+                                    far_amount = Decimal(str(far_line.from_center)) if far_line.from_center else Decimal('0.00')
+                                    segment_total_used += far_amount
+                                    
+                                    # Track FAR details
+                                    far_usage_details.append({
+                                        "far_id": far_transfer.transaction_id,
+                                        "far_code": far_transfer.code,
+                                        "amount_used": float(far_amount),
+                                        "date": far_transfer.request_date.strftime('%Y-%m-%d') if far_transfer.request_date else None,
+                                        "status": far_transfer.status
+                                    })
+                        
+                        overall_total_used += segment_total_used
+                        
+                        # Calculate remaining for this segment combination
+                        segment_remaining = original_amount - segment_total_used
+                        
+                        segment_usage.append({
+                            "transfer_line_id": hfr_transfer.transfer_id,
+                            "segments": segment_details,
+                            "original_hold": float(original_amount),
+                            "total_used": float(segment_total_used),
+                            "remaining": float(segment_remaining),
+                            "percentage_used": float((segment_total_used / original_amount * 100) if original_amount > 0 else 0),
+                            "far_usage": far_usage_details,
+                            "can_unhold": segment_remaining > 0
+                        })
+                    
+                    # Overall summary
+                    overall_remaining = overall_original_hold - overall_total_used
+                    
+                    # Generate suggestion message
+                    if overall_remaining > 0:
+                        suggestion = f"You have {overall_remaining:,.2f} remaining in hold across all segments. You can unhold it or create a new FAR transfer."
+                    elif overall_remaining == 0:
+                        suggestion = "This HFR hold has been fully used across all segments. No remaining funds to unhold."
+                    else:
+                        suggestion = f"Warning: Over-utilized by {abs(overall_remaining):,.2f}. Total used exceeds original hold amount."
+                    
+                    # Add HFR tracking info to summary
+                    summary["History"] = {
+                        "original_hold": float(overall_original_hold),
+                        "total_used": float(overall_total_used),
+                        "remaining_in_hold": float(overall_remaining),
+                        "can_unhold_remaining": overall_remaining > 0,
+                        "segment_breakdown": segment_usage,
+                        "total_segments": len(segment_usage),
+                        "suggestion": suggestion
+                    }
             else:
                 summary = {
                     "transaction_id": transaction_id,

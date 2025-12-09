@@ -163,12 +163,67 @@ class CreateBudgetTransferView(APIView):
             if linked_budget_transfer:
                 from account_and_entitys.models import XX_TransactionSegment
                 
+                # ========== HFR AUTO-CALCULATION LOGIC ==========
+                # If source is HFR, calculate remaining hold and adjust amounts automatically
+                hfr_remaining = Decimal('0.00')
+                is_hfr_source = budget and budget.code and budget.code[0:3] == "HFR"
+                
+                if is_hfr_source:
+                    # Get HFR original hold amount (total from_center)
+                    hfr_transfers = xx_TransactionTransfer.objects.filter(transaction_id=linked_budget_transfer)
+                    hfr_original_hold = sum(
+                        Decimal(str(t.from_center)) if t.from_center else Decimal('0.00')
+                        for t in hfr_transfers
+                    )
+                    
+                    # Find all FAR transfers already linked to this HFR
+                    linked_fars = xx_BudgetTransfer.objects.filter(
+                        linked_transfer_id=linked_budget_transfer,
+                        code__startswith="FAR"
+                    )
+                    
+                    # Calculate total already used
+                    total_used = sum(
+                        Decimal(str(far.amount)) if far.amount else Decimal('0.00')
+                        for far in linked_fars
+                    )
+                    
+                    # Calculate remaining in HFR hold
+                    hfr_remaining = hfr_original_hold - total_used
+                    
+                    print(f"🔍 HFR Auto-Calculation:")
+                    print(f"   Original Hold: {hfr_original_hold}")
+                    print(f"   Already Used: {total_used}")
+                    print(f"   Remaining: {hfr_remaining}")
+                
                 for transfer_item in transfers:
-                    # Create new transaction transfer with all fields from source
+                    # Determine the actual amounts to use based on HFR remaining
+                    from_center_amount = transfer_item.from_center
+                    to_center_amount = transfer_item.to_center
+                    
+                    if is_hfr_source and from_center_amount:
+                        # User is taking from HFR hold
+                        requested_amount = Decimal(str(from_center_amount))
+                        
+                        if requested_amount <= hfr_remaining:
+                            # Scenario 1: Requested amount fits within HFR hold
+                            # Use only from HFR (no change needed)
+                            from_center_amount = requested_amount
+                            print(f"   ✅ Using {requested_amount} from HFR hold (sufficient)")
+                        else:
+                            # Scenario 2: Requested amount > HFR remaining
+                            # This will be handled by taking remaining from HFR + rest from fund
+                            # The "rest from fund" happens automatically via available budget
+                            from_center_amount = requested_amount
+                            extra_needed = requested_amount - hfr_remaining
+                            print(f"   ⚠️  Requested {requested_amount} > Remaining {hfr_remaining}")
+                            print(f"   📊 Will use {hfr_remaining} from HFR + {extra_needed} from available fund")
+                    
+                    # Create new transaction transfer with calculated amounts
                     new_transfer = xx_TransactionTransfer.objects.create(
                         transaction=transfer,
-                        from_center=transfer_item.from_center,
-                        to_center=transfer_item.to_center,
+                        from_center=from_center_amount,
+                        to_center=to_center_amount,
                         reason=transfer_item.reason,
                         account_code=transfer_item.account_code,
                         account_name=transfer_item.account_name,
@@ -363,7 +418,8 @@ class ListBudgetTransferView(APIView):
                 "type",
                 "notes",
                 "transfer_type",
-                "control_budget"
+                "control_budget",
+                "resone"
             )
         )
 
@@ -372,6 +428,81 @@ class ListBudgetTransferView(APIView):
         for row in transfer_list:
             # Prefer the workflow_status annotation, fall back to existing status if present
             row["status"] = row.pop("workflow_status", row.get("status"))
+            
+            transaction_id = row.get("transaction_id")
+            
+            # ========== Get Approval Actions (Reasons/Comments) ==========
+            from approvals.models import ApprovalAction, ApprovalWorkflowInstance
+            
+            approval_actions = []
+            try:
+                # Get workflow instance for this transaction
+                workflow_instance = ApprovalWorkflowInstance.objects.filter(
+                    budget_transfer_id=transaction_id
+                ).first()
+                
+                if workflow_instance:
+                    # Get all approval actions for this workflow
+                    actions = ApprovalAction.objects.filter(
+                        stage_instance__workflow_instance=workflow_instance
+                    ).select_related('user', 'stage_instance__stage').order_by('created_at')
+                    
+                    for action in actions:
+                        approval_actions.append({
+                            "action": action.action,
+                            "comment": action.comment,
+                            "user": action.user.username if action.user else "System",
+                            "user_id": action.user.id if action.user else None,
+                            "stage_name": action.stage_instance.stage.name if action.stage_instance and action.stage_instance.stage else None,
+                            "created_at": action.created_at.strftime('%Y-%m-%d %H:%M:%S') if action.created_at else None
+                        })
+            except Exception as e:
+                print(f"Error fetching approval actions for transaction {transaction_id}: {e}")
+            
+            row["approval_actions"] = approval_actions
+            
+            # ========== HFR-Specific: Add hold availability flags ==========
+            if row.get("type") == "HFR":
+                transaction_id = row.get("transaction_id")
+                
+                # Calculate HFR hold status
+                hfr_transfers = xx_TransactionTransfer.objects.filter(transaction_id=transaction_id)
+                original_hold = sum(
+                    Decimal(str(t.from_center)) if t.from_center else Decimal('0.00')
+                    for t in hfr_transfers
+                )
+                
+                # Find all FAR transfers linked to this HFR that are IN PROGRESS or APPROVED
+                # Only count FARs that have been submitted (status_level >= 2) or approved
+                linked_fars = xx_BudgetTransfer.objects.filter(
+                    linked_transfer_id=transaction_id,
+                    code__startswith="FAR"
+                ).filter(
+                    Q(status="approved") | Q(status_level__gte=2)  # In progress (submitted) or approved
+                ).exclude(
+                    status_level__lt=1  # Exclude rejected (status_level < 1)
+                )
+                
+                # Calculate total used by summing actual transfer amounts (from_center) from linked FARs
+                total_used = Decimal('0.00')
+                for far in linked_fars:
+                    # Get the actual transfers for this FAR and sum their from_center values
+                    far_transfers = xx_TransactionTransfer.objects.filter(transaction_id=far.transaction_id)
+                    far_total = sum(
+                        Decimal(str(t.from_center)) if t.from_center else Decimal('0.00')
+                        for t in far_transfers
+                    )
+                    total_used += far_total
+                
+                remaining = original_hold - total_used
+                
+                # Add HFR flags to the row
+                row["hfr_original_hold"] = float(original_hold)
+                row["hfr_total_used"] = float(total_used)
+                row["hfr_remaining"] = float(remaining)
+                row["hfr_has_remaining"] = remaining > 0  # True = show buttons, False = hide/disable
+                row["hfr_is_fully_used"] = remaining <= 0  # True = all used, False = still available
+                row["hfr_linked_far_count"] = linked_fars.count()
 
         # Manual pagination to avoid Oracle issues
         page = int(request.GET.get("page", 1))
@@ -398,7 +529,7 @@ class ListBudgetTransferView(APIView):
 
 
 class ListBudgetTransfer_approvels_View(APIView):
-    """List budget transfers with pagination"""
+    """List budget transfers with two lists: pending and history (approved/rejected)"""
 
     permission_classes = [IsAuthenticated]
     pagination_class = TransferPagination
@@ -408,50 +539,100 @@ class ListBudgetTransfer_approvels_View(APIView):
         date = request.data.get("date", None)
         start_date = request.data.get("start_date", None)
         end_date = request.data.get("end_date", None)
+        status_filter = request.query_params.get("status", None)
 
         if code is None:
             code = "FAR"
-        status_level_val = (
-            request.user.user_level.level_order
-            if request.user.user_level.level_order
-            else 0
-        )
-        # transfers = xx_BudgetTransfer.objects.filter(
-        #     status_level=status_level_val, type=code, status="pending"
-        # )
-        transfers = ApprovalManager.get_user_pending_approvals(request.user)
+        
+        # Initialize response structure
+        response_data = {}
+        
+        # If status filter is "pending" or None, include pending transfers
+        if status_filter in [None, "pending"]:
+            # Get pending transfers for this user
+            pending_transfers = ApprovalManager.get_user_pending_approvals(request.user)
 
-        if request.user.abilities_legacy.count() > 0:
-            transfers = filter_budget_transfers_all_in_entities(
-                transfers, request.user, "approve"
+            if request.user.abilities_legacy.count() > 0:
+                pending_transfers = filter_budget_transfers_all_in_entities(
+                    pending_transfers, request.user, "approve"
+                )
+
+            if code:
+                pending_transfers = pending_transfers.filter(code__icontains=code)
+
+            pending_transfers = pending_transfers.order_by("-request_date")
+
+            # Serialize pending transfers
+            pending_serializer = BudgetTransferSerializer(pending_transfers, many=True)
+            pending_data = []
+            for item in pending_serializer.data:
+                filtered_item = {
+                    "transaction_id": item.get("transaction_id"),
+                    "amount": item.get("amount"),
+                    "status": item.get("status"),
+                    "status_level": item.get("status_level"),
+                    "requested_by": item.get("requested_by"),
+                    "request_date": item.get("request_date"),
+                    "code": item.get("code"),
+                    "transaction_date": item.get("transaction_date"),
+                }
+                pending_data.append(filtered_item)
+            
+            response_data["pending"] = {
+                "count": len(pending_data),
+                "results": pending_data
+            }
+
+        # If status filter is "history" or None, include history transfers
+        if status_filter in [None, "history"]:
+            # Get history transfers (approved or rejected) that the user has acted on
+            from approvals.models import ApprovalAction
+            
+            # Get all approval actions by this user
+            user_approval_actions = ApprovalAction.objects.filter(
+                actor=request.user,
+                action__in=['approve', 'reject']
+            ).values_list('workflow_instance__budget_transfer_id', flat=True)
+
+            # Get the budget transfers from those actions
+            history_transfers = xx_BudgetTransfer.objects.filter(
+                transaction_id__in=user_approval_actions
+            ).filter(
+                Q(status="approved") | Q(status="rejected")
             )
 
-        if code:
-            transfers = transfers.filter(code__icontains=code)
+            if request.user.abilities_legacy.count() > 0:
+                history_transfers = filter_budget_transfers_all_in_entities(
+                    history_transfers, request.user, "approve"
+                )
 
-        transfers = transfers.order_by("-request_date")
+            if code:
+                history_transfers = history_transfers.filter(code__icontains=code)
 
-        # Paginate results
-        paginator = self.pagination_class()
-        page = paginator.paginate_queryset(transfers, request, view=self)
-        serializer = BudgetTransferSerializer(page, many=True)
+            history_transfers = history_transfers.order_by("-request_date")
 
-        # Create a list of dictionaries with just the fields we want
-        filtered_data = []
-        for item in serializer.data:
-            filtered_item = {
-                "transaction_id": item.get("transaction_id"),
-                "amount": item.get("amount"),
-                "status": item.get("status"),
-                "status_level": item.get("status_level"),
-                "requested_by": item.get("requested_by"),
-                "request_date": item.get("request_date"),
-                "code": item.get("code"),
-                "transaction_date": item.get("transaction_date"),
+            # Serialize history transfers
+            history_serializer = BudgetTransferSerializer(history_transfers, many=True)
+            history_data = []
+            for item in history_serializer.data:
+                filtered_item = {
+                    "transaction_id": item.get("transaction_id"),
+                    "amount": item.get("amount"),
+                    "status": item.get("status"),
+                    "status_level": item.get("status_level"),
+                    "requested_by": item.get("requested_by"),
+                    "request_date": item.get("request_date"),
+                    "code": item.get("code"),
+                    "transaction_date": item.get("transaction_date"),
+                }
+                history_data.append(filtered_item)
+            
+            response_data["history"] = {
+                "count": len(history_data),
+                "results": history_data
             }
-            filtered_data.append(filtered_item)
 
-        return paginator.get_paginated_response(filtered_data)
+        return Response(response_data, status=status.HTTP_200_OK)
 
 
 class ApproveBudgetTransferView(APIView):
@@ -787,7 +968,7 @@ class transcationtransferapprovel_reject(APIView):
                         # Update the pivot fund
                         if trasncation.code[0:3] != "HFR":
 
-                            if Status == "approved" :
+                            if Status == "approved":
                                 # Queue background task for Oracle upload
                                 print(f"Queuing budget upload task for transaction {transaction_id}")
                                 upload_budget_to_oracle.delay(
@@ -798,19 +979,83 @@ class transcationtransferapprovel_reject(APIView):
                                     "transaction_id": transaction_id,
                                     "status": "success",
                                     "message": "Transaction approved successfully"
-                            })
+                                })
                             
-                        if Status == "rejected":
-                            print(f"Queuing journal upload task for transaction {transaction_id}")
-                            upload_journal_to_oracle.delay(
+                            if Status == "rejected":
+                                print(f"Queuing journal upload task for transaction {transaction_id}")
+                                upload_journal_to_oracle.delay(
                                     transaction_id=transaction_id,
                                     entry_type="reject"
                                 )
-                        results.append({
-                                "transaction_id": transaction_id,
-                                "status": "success",
-                                "message": "Transaction rejected successfully"
-                        })
+                                results.append({
+                                    "transaction_id": transaction_id,
+                                    "status": "success",
+                                    "message": "Transaction rejected successfully"
+                                })
+                        
+                        # ========== HFR REJECTION LOGIC ==========
+                        # For HFR: When rejected, return remaining unused amount to Oracle
+                        elif trasncation.code[0:3] == "HFR":
+                            if Status == "rejected":
+                                # Calculate remaining unused amount
+                                hfr_transfers = xx_TransactionTransfer.objects.filter(transaction_id=transaction_id)
+                                original_hold = sum(
+                                    Decimal(str(t.from_center)) if t.from_center else Decimal('0.00')
+                                    for t in hfr_transfers
+                                )
+                                
+                                # Find all approved/in-progress FAR transfers linked to this HFR
+                                linked_fars = xx_BudgetTransfer.objects.filter(
+                                    linked_transfer_id=transaction_id,
+                                    code__startswith="FAR"
+                                ).filter(
+                                    Q(status="approved") | Q(status_level__gte=2)
+                                ).exclude(
+                                    status_level__lt=1
+                                )
+                                
+                                total_used = Decimal('0.00')
+                                for far in linked_fars:
+                                    far_transfers = xx_TransactionTransfer.objects.filter(transaction_id=far.transaction_id)
+                                    far_total = sum(
+                                        Decimal(str(t.from_center)) if t.from_center else Decimal('0.00')
+                                        for t in far_transfers
+                                    )
+                                    total_used += far_total
+                                
+                                remaining = original_hold - total_used
+                                
+                                print(f"🔴 HFR REJECTION: Transaction {transaction_id}")
+                                print(f"   Original Hold: {original_hold}")
+                                print(f"   Already Used: {total_used}")
+                                print(f"   Remaining to Return: {remaining}")
+                                
+                                # Only upload journal if there's remaining amount to return
+                                if remaining > 0:
+                                    print(f"Queuing journal upload for HFR rejection (returning {remaining})")
+                                    upload_journal_to_oracle.delay(
+                                        transaction_id=transaction_id,
+                                        entry_type="reject"
+                                    )
+                                    results.append({
+                                        "transaction_id": transaction_id,
+                                        "status": "success",
+                                        "message": f"HFR rejected - returning {float(remaining):,.2f} to fund"
+                                    })
+                                else:
+                                    print(f"No remaining amount to return (fully used)")
+                                    results.append({
+                                        "transaction_id": transaction_id,
+                                        "status": "success",
+                                        "message": "HFR rejected - hold was fully used, no amount to return"
+                                    })
+                            elif Status == "approved":
+                                # HFR approved - no Oracle action needed (hold remains active)
+                                results.append({
+                                    "transaction_id": transaction_id,
+                                    "status": "success",
+                                    "message": "HFR approved - hold is now active"
+                                })
                     
                     except Exception as e:
                         results.append(
@@ -1436,7 +1681,7 @@ class DashboardBudgetTransferView(APIView):
             )
 
 
-### mobile version #####
+### mobile version #####           
 
 
 class ListBudgetTransfer_approvels_MobileView(APIView):

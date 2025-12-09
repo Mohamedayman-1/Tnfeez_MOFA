@@ -217,12 +217,60 @@ def create_journal_entry_data(
     sample_data = []
     total_debit = 0
     
+    budget_trasnfer=xx_BudgetTransfer.objects.get(transaction_id=transaction_id)
+    linked_transfer=budget_trasnfer.linked_transfer_id
+    
+    # ========== HFR REJECTION SPECIAL LOGIC ==========
+    # For HFR rejection, only return the REMAINING unused amount
+    hfr_remaining_amount = None
+    if entry_type == "reject" and budget_trasnfer.code and budget_trasnfer.code[0:3] == "HFR":
+        from decimal import Decimal
+        
+        # Calculate original hold amount
+        hfr_transfers = list(transfers)
+        original_hold = sum(
+            Decimal(str(t.from_center)) if t.from_center else Decimal('0.00')
+            for t in hfr_transfers
+        )
+        
+        # Find all approved/in-progress FAR transfers linked to this HFR
+        from django.db.models import Q
+        linked_fars = xx_BudgetTransfer.objects.filter(
+            linked_transfer_id=transaction_id,
+            code__startswith="FAR"
+        ).filter(
+            Q(status="approved") | Q(status_level__gte=2)
+        ).exclude(
+            status_level__lt=1
+        )
+        
+        # Calculate total used
+        total_used = Decimal('0.00')
+        for far in linked_fars:
+            from transaction.models import xx_TransactionTransfer as TT
+            far_transfers = TT.objects.filter(transaction_id=far.transaction_id)
+            far_total = sum(
+                Decimal(str(t.from_center)) if t.from_center else Decimal('0.00')
+                for t in far_transfers
+            )
+            total_used += far_total
+        
+        # Calculate remaining
+        hfr_remaining_amount = original_hold - total_used
+        
+        print(f"🔴 HFR REJECTION Journal Entry:")
+        print(f"   Original Hold: {original_hold}")
+        print(f"   Already Used: {total_used}")
+        print(f"   Remaining to Return: {hfr_remaining_amount}")
+        
+        # If nothing remaining, return empty journal (no entry needed)
+        if hfr_remaining_amount <= 0:
+            print(f"   ⚠️  No remaining amount - skipping journal entry")
+            return sample_data, False, False, True  # Return empty with status=False
+    
     # Calculate total for offsetting entry
     for transfer in transfers:
         total_debit += getattr(transfer, "from_center", 0) or 0
-
-    budget_trasnfer=xx_BudgetTransfer.objects.get(transaction_id=transaction_id)
-    linked_transfer=budget_trasnfer.linked_transfer_id
 
 
     # Create journal lines for each transfer (FROM side - debit entries)
@@ -304,6 +352,36 @@ def create_journal_entry_data(
             debit_amount = current_from_amount
             credit_amount = 0
         
+        # ========== HFR REJECTION: Use proportional remaining amount ==========
+        if hfr_remaining_amount is not None and entry_type == "reject":
+            # For HFR rejection, proportionally reduce each transfer's amount
+            # based on the ratio: remaining / original_hold
+            from decimal import Decimal
+            
+            # Calculate what percentage of original we're returning
+            original_transfer_amount = Decimal(str(current_from_amount))
+            
+            # Get total original hold (sum of all from_center values)
+            total_original = sum(
+                Decimal(str(t.from_center)) if t.from_center else Decimal('0.00')
+                for t in transfers
+            )
+            
+            if total_original > 0:
+                # Calculate proportional amount for this transfer
+                proportion = original_transfer_amount / total_original
+                proportional_amount = float(hfr_remaining_amount * proportion)
+                
+                debit_amount = proportional_amount
+                credit_amount = 0
+                
+                print(f"   📝 Transfer {transfer.transfer_id}: Original={original_transfer_amount}, "
+                      f"Proportion={proportion:.2%}, Remaining Amount={proportional_amount:.2f}")
+            else:
+                # Edge case: total is 0, skip this transfer
+                print(f"   ⏭️  Skipping transfer {transfer.transfer_id} (total original is 0)")
+                continue
+        
         if debit_amount > 0:
             # Create DEBIT entry
             journal_entry = {
@@ -360,6 +438,11 @@ def create_journal_entry_data(
                 fill_all=True
             )
             sample_data.append(credit_segment_data)
+
+    # ========== HFR REJECTION: Use remaining amount for offsetting entry ==========
+    if hfr_remaining_amount is not None and entry_type == "reject":
+        total_debit = float(hfr_remaining_amount)
+        print(f"   📊 Setting offsetting entry to remaining amount: {total_debit}")
 
     if total_debit > 0 and transfers:
         
