@@ -418,8 +418,7 @@ class ListBudgetTransferView(APIView):
                 "type",
                 "notes",
                 "transfer_type",
-                "control_budget",
-                "resone"
+                "control_budget"
             )
         )
 

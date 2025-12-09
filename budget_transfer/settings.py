@@ -45,7 +45,7 @@ INSTALLED_APPS = [
     "django_extensions",
     "approvals",
     "Chatting",
-    "Invoice",
+    # "Invoice",
     # "AI"
 ]
 
