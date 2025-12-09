@@ -570,8 +570,8 @@ class ListBudgetTransfer_approvels_View(APIView):
         if code is None:
             code = "FAR"
         
-        # Initialize response structure
-        response_data = {}
+        # Initialize combined data list
+        all_data = []
         
         # If status filter is "pending" or None, include pending transfers
         if status_filter in [None, "pending"]:
@@ -590,7 +590,6 @@ class ListBudgetTransfer_approvels_View(APIView):
 
             # Serialize pending transfers
             pending_serializer = BudgetTransferSerializer(pending_transfers, many=True)
-            pending_data = []
             for item in pending_serializer.data:
                 filtered_item = {
                     "transaction_id": item.get("transaction_id"),
@@ -601,13 +600,9 @@ class ListBudgetTransfer_approvels_View(APIView):
                     "request_date": item.get("request_date"),
                     "code": item.get("code"),
                     "transaction_date": item.get("transaction_date"),
+                    "category": "pending"  # Add category identifier
                 }
-                pending_data.append(filtered_item)
-            
-            response_data["pending"] = {
-                "count": len(pending_data),
-                "results": pending_data
-            }
+                all_data.append(filtered_item)
 
         # If status filter is "history" or None, include history transfers
         if status_filter in [None, "history"]:
@@ -639,7 +634,6 @@ class ListBudgetTransfer_approvels_View(APIView):
 
             # Serialize history transfers
             history_serializer = BudgetTransferSerializer(history_transfers, many=True)
-            history_data = []
             for item in history_serializer.data:
                 filtered_item = {
                     "transaction_id": item.get("transaction_id"),
@@ -650,15 +644,11 @@ class ListBudgetTransfer_approvels_View(APIView):
                     "request_date": item.get("request_date"),
                     "code": item.get("code"),
                     "transaction_date": item.get("transaction_date"),
+                    "category": "history"  # Add category identifier
                 }
-                history_data.append(filtered_item)
-            
-            response_data["history"] = {
-                "count": len(history_data),
-                "results": history_data
-            }
+                all_data.append(filtered_item)
 
-        return Response(response_data, status=status.HTTP_200_OK)
+        return Response({"results": all_data}, status=status.HTTP_200_OK)
 
 
 class ApproveBudgetTransferView(APIView):
