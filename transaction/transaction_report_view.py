@@ -12,6 +12,7 @@ from account_and_entitys.models import (
     XX_TransactionSegment,
     XX_DynamicBalanceReport
 )
+from account_and_entitys.oracle import OracleBalanceReportManager
 
 
 class TransactionComprehensiveReportView(APIView):
@@ -97,8 +98,11 @@ class TransactionComprehensiveReportView(APIView):
         """Generate comprehensive report for given transaction IDs."""
         results = []
         
-        # Get all segment types ordered by display_order
-        segment_types = XX_SegmentType.objects.filter(is_active=True).order_by('display_order')
+        # Get only required segment types ordered by display_order
+        segment_types = XX_SegmentType.objects.filter(
+            is_active=True,
+            is_required=True
+        ).order_by('display_order')
         
         for transaction_id in transaction_ids:
             try:
@@ -168,10 +172,10 @@ class TransactionComprehensiveReportView(APIView):
                                 "to_name": ""
                             }
                     
-                    # Get budget control information from balance report
+                    # Get budget control information using OracleBalanceReportManager
                     budget_info = self._get_budget_control_info(
-                        segment_codes_dict,
-                        transaction.control_budget
+                        transfer,
+                        segment_codes_dict
                     )
                     
                     transfer_data = {
@@ -236,74 +240,101 @@ class TransactionComprehensiveReportView(APIView):
                 status=status.HTTP_200_OK
             )
     
-    def _get_budget_control_info(self, segment_codes_dict, control_budget_name):
+    def _get_budget_control_info(self, transfer, segment_codes_dict):
         """
-        Get budget control information from XX_DynamicBalanceReport.
+        Get budget control information using OracleBalanceReportManager (same as transfer list view).
         
         Args:
+            transfer: xx_TransactionTransfer object
             segment_codes_dict: Dict of {segment_type_id: segment_code}
-            control_budget_name: Control budget name from transaction
             
         Returns:
-            Dict with budget control information
+            Dict with budget control information for all control budgets
         """
         try:
-            # Query balance report matching segment combination and control budget
-            balance_report = XX_DynamicBalanceReport.objects.filter(
-                control_budget_name=control_budget_name
-            ).first()
+            # Initialize Oracle balance manager
+            balance_manager = OracleBalanceReportManager()
             
-            # Try to find exact match based on segments
-            if balance_report is None and segment_codes_dict:
-                # Try querying with segment values
-                for report in XX_DynamicBalanceReport.objects.filter(
-                    control_budget_name=control_budget_name
-                ).all():
-                    # Check if segment_values match
-                    if report.segment_values == segment_codes_dict:
-                        balance_report = report
-                        break
+            # Determine transfer direction
+            from_center_val = float(transfer.from_center) if transfer.from_center not in [None, ""] else 0.0
+            to_center_val = float(transfer.to_center) if transfer.to_center not in [None, ""] else 0.0
+            is_source_transfer = from_center_val > 0  # True = taking funds (FROM), False = receiving funds (TO)
             
-            if balance_report:
+            # Build segment filters from XX_TransactionSegment records
+            transaction_segments = transfer.transaction_segments.select_related(
+                'segment_type', 'from_segment_value', 'to_segment_value'
+            )
+            
+            segment_filters = {}
+            for trans_seg in transaction_segments:
+                segment_type_id = trans_seg.segment_type_id
+                
+                # Select the correct segment value based on transfer direction
+                if is_source_transfer:
+                    segment_code = trans_seg.from_segment_value.code if trans_seg.from_segment_value else None
+                else:
+                    segment_code = trans_seg.to_segment_value.code if trans_seg.to_segment_value else None
+                
+                if segment_code:
+                    segment_filters[segment_type_id] = segment_code
+            
+            # Get balance data from XX_Segment_Funds using OracleBalanceReportManager
+            result = balance_manager.get_segments_fund(segment_filters=segment_filters)
+            data = result.get("data", [])
+            
+            if data and len(data) > 0:
+                # Return first control budget record (primary)
+                record = data[0]
+                
                 # Build segment info for response
                 segment_info = {}
-                for seg_id, seg_code in balance_report.segment_values.items():
+                for seg_id, seg_code in segment_filters.items():
                     segment_info[f"segment{seg_id}"] = seg_code
                 
                 return {
-                    "control_budget_name": balance_report.control_budget_name or "",
-                    "period_name": balance_report.as_of_period or "",
-                    "budget": float(balance_report.budget_ytd) if balance_report.budget_ytd else 0.0,
-                    "encumbrance": float(balance_report.encumbrance_ytd) if balance_report.encumbrance_ytd else 0.0,
-                    "funds_available": float(balance_report.funds_available_asof) if balance_report.funds_available_asof else 0.0,
-                    "actual": float(balance_report.actual_ytd) if balance_report.actual_ytd else 0.0,
-                    "other": float(balance_report.other_ytd) if balance_report.other_ytd else 0.0,
-                    "created_at": balance_report.created_at.isoformat() if balance_report.created_at else None,
+                    "control_budget_name": record.get("Control_budget_name", ""),
+                    "period_name": record.get("As_of_period", ""),
+                    "budget": float(record.get("Budget", 0.0)),
+                    "encumbrance": float(record.get("Encumbrance", 0.0)),
+                    "funds_available": float(record.get("Funds_available", 0.0)),
+                    "actual": float(record.get("Actual", 0.0)),
+                    "other": float(record.get("Other", 0.0)),
+                    "total_budget": float(record.get("Total_budget", 0.0)),
+                    "initial_budget": float(record.get("Initial_budget", 0.0)),
+                    "budget_adjustments": float(record.get("Budget_adjustments", 0.0)),
+                    "commitments": float(record.get("Commitments", 0.0)),
+                    "expenditures": float(record.get("Expenditures", 0.0)),
+                    "obligations": float(record.get("Obligation", 0.0)),
+                    "all_control_budgets": data,  # Include all control budget records
                     **segment_info
                 }
             else:
-                # Return empty structure if no balance report found
-                return {
-                    "control_budget_name": control_budget_name or "",
-                    "period_name": "",
-                    "budget": 0.0,
-                    "encumbrance": 0.0,
-                    "funds_available": 0.0,
-                    "actual": 0.0,
-                    "other": 0.0,
-                    "created_at": None
-                }
+                # Return empty structure if no balance data found
+                return self._empty_budget_control(transfer.transaction.control_budget if hasattr(transfer.transaction, 'control_budget') else "")
                 
         except Exception as e:
-            # Return empty structure on error
+            # Return empty structure on error with error message
             return {
-                "control_budget_name": control_budget_name or "",
+                "control_budget_name": "",
                 "period_name": "",
                 "budget": 0.0,
                 "encumbrance": 0.0,
                 "funds_available": 0.0,
                 "actual": 0.0,
                 "other": 0.0,
-                "created_at": None,
+                "total_budget": 0.0,
                 "error": str(e)
             }
+    
+    def _empty_budget_control(self, control_budget_name):
+        """Return empty budget control structure."""
+        return {
+            "control_budget_name": control_budget_name or "",
+            "period_name": "",
+            "budget": 0.0,
+            "encumbrance": 0.0,
+            "funds_available": 0.0,
+            "actual": 0.0,
+            "other": 0.0,
+            "total_budget": 0.0
+        }
