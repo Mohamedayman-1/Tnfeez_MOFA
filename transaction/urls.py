@@ -11,6 +11,8 @@ from .views import (
     TransactionTransferExcelTemplateView,
     # BudgetQuestionAnswerView,
 )
+from .transfer_details_view import TransactionTransferDetailsView
+from .transaction_report_view import TransactionComprehensiveReportView
 
 urlpatterns = [
     # List and create endpoints
@@ -23,6 +25,10 @@ urlpatterns = [
     # Submit and reopen endpoints
     path("submit/", transcationtransferSubmit.as_view(), name="transfer-submit"),
     path("reopen/", transcationtransfer_Reopen.as_view(), name="transfer-reopen"),
+    # Transfer details endpoint (supports single or multiple transaction IDs)
+    path("transfer-details/", TransactionTransferDetailsView.as_view(), name="transfer-details"),
+    # Comprehensive report endpoint
+    path("report/", TransactionComprehensiveReportView.as_view(), name="transaction-report"),
     # Excel template and upload endpoints
     path("excel-template/", TransactionTransferExcelTemplateView.as_view(), name="transfer-excel-template"),
     path("excel-upload/",TransactionTransferExcelUploadView.as_view(),name="transfer-excel-upload",),

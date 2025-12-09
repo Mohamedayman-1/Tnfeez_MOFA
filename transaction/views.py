@@ -1145,6 +1145,7 @@ class TransactionTransferListView(APIView):
             )
 
 
+
 class TransactionTransferDetailView(APIView):
     """Retrieve a specific transaction transfer with DYNAMIC SEGMENT support"""
 

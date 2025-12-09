@@ -431,8 +431,6 @@ class ListBudgetTransferView(APIView):
             transaction_id = row.get("transaction_id")
             
             # ========== Get Approval Actions (Reasons/Comments) ==========
-            from approvals.models import ApprovalAction, ApprovalWorkflowInstance
-            
             approval_actions = []
             try:
                 # Get workflow instance for this transaction
@@ -441,22 +439,51 @@ class ListBudgetTransferView(APIView):
                 ).first()
                 
                 if workflow_instance:
-                    # Get all approval actions for this workflow
-                    actions = ApprovalAction.objects.filter(
-                        stage_instance__workflow_instance=workflow_instance
-                    ).select_related('user', 'stage_instance__stage').order_by('created_at')
+                    # Get all stage instances for this workflow
+                    stage_instances = workflow_instance.stage_instances.all()
                     
-                    for action in actions:
-                        approval_actions.append({
-                            "action": action.action,
-                            "comment": action.comment,
-                            "user": action.user.username if action.user else "System",
-                            "user_id": action.user.id if action.user else None,
-                            "stage_name": action.stage_instance.stage.name if action.stage_instance and action.stage_instance.stage else None,
-                            "created_at": action.created_at.strftime('%Y-%m-%d %H:%M:%S') if action.created_at else None
-                        })
+                    # Get only reject actions from all stages
+                    for stage_instance in stage_instances:
+                        actions = stage_instance.actions.filter(action='reject').select_related('user').order_by('created_at')
+                        
+                        for action in actions:
+                            approval_actions.append({
+                                "action": action.action,
+                                "comment": action.comment,
+                                "user": action.user.username if action.user else "System",
+                                "user_id": action.user.id if action.user else None,
+                                "stage_name": stage_instance.stage.name if stage_instance.stage else None,
+                                "stage_order": stage_instance.stage.order if stage_instance.stage else None,
+                                "created_at": action.created_at.strftime('%Y-%m-%d %H:%M:%S') if action.created_at else None
+                            })
+                    
+                    print(f"Transaction {transaction_id}: Found {len(approval_actions)} approval actions from {stage_instances.count()} stages")
+                else:
+                    print(f"Transaction {transaction_id}: No workflow instance found")
+                    
+                # Fallback: Check legacy reject reasons table
+                if not approval_actions:
+                    reject_reasons = xx_BudgetTransferRejectReason.objects.filter(
+                        Transcation_id=transaction_id  # Note: Field name has typo in model
+                    ).order_by('-reject_date')
+                    
+                    if reject_reasons.exists():
+                        print(f"Transaction {transaction_id}: Found {reject_reasons.count()} legacy reject reasons")
+                        for reason in reject_reasons:
+                            approval_actions.append({
+                                "action": "reject",
+                                "comment": reason.reason_text,
+                                "user": reason.reject_by if hasattr(reason, 'reject_by') else "Unknown",
+                                "user_id": None,
+                                "stage_name": "Legacy Rejection",
+                                "stage_order": None,
+                                "created_at": reason.reject_date.strftime('%Y-%m-%d %H:%M:%S') if hasattr(reason, 'reject_date') and reason.reject_date else None
+                            })
+                        
             except Exception as e:
                 print(f"Error fetching approval actions for transaction {transaction_id}: {e}")
+                import traceback
+                traceback.print_exc()
             
             row["approval_actions"] = approval_actions
             
@@ -589,9 +616,9 @@ class ListBudgetTransfer_approvels_View(APIView):
             
             # Get all approval actions by this user
             user_approval_actions = ApprovalAction.objects.filter(
-                actor=request.user,
+                user=request.user,
                 action__in=['approve', 'reject']
-            ).values_list('workflow_instance__budget_transfer_id', flat=True)
+            ).values_list('stage_instance__workflow_instance__budget_transfer_id', flat=True)
 
             # Get the budget transfers from those actions
             history_transfers = xx_BudgetTransfer.objects.filter(
