@@ -606,18 +606,17 @@ class ListBudgetTransfer_approvels_View(APIView):
 
         # If status filter is "history" or None, include history transfers
         if status_filter in [None, "history"]:
-            # Get history transfers (approved or rejected) that the user has acted on
-            from approvals.models import ApprovalAction
+            # Get history transfers (approved or rejected) that were assigned to this user
+            from approvals.models import ApprovalAction, ApprovalWorkflowStageInstance
             
-            # Get all approval actions by this user
-            user_approval_actions = ApprovalAction.objects.filter(
-                user=request.user,
-                action__in=['approve', 'reject']
-            ).values_list('stage_instance__workflow_instance__budget_transfer_id', flat=True)
+            # Get all workflow stage instances where this user was assigned as approver
+            user_stage_instances = ApprovalWorkflowStageInstance.objects.filter(
+                assigned_approvers=request.user
+            ).values_list('workflow_instance__budget_transfer_id', flat=True)
 
-            # Get the budget transfers from those actions
+            # Get the budget transfers that are finished (approved or rejected)
             history_transfers = xx_BudgetTransfer.objects.filter(
-                transaction_id__in=user_approval_actions
+                transaction_id__in=user_stage_instances
             ).filter(
                 Q(status="approved") | Q(status="rejected")
             )
