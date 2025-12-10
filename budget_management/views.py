@@ -611,7 +611,7 @@ class ListBudgetTransfer_approvels_View(APIView):
             
             # Get all workflow stage instances where this user was assigned as approver
             user_stage_instances = ApprovalWorkflowStageInstance.objects.filter(
-                assigned_approvers=request.user
+                assignments__user=request.user
             ).values_list('workflow_instance__budget_transfer_id', flat=True)
 
             # Get the budget transfers that are finished (approved or rejected)
