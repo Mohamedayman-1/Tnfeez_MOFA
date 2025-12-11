@@ -52,12 +52,43 @@ class xx_BudgetTransfer(models.Model):
         max_length=50, null=True, blank=True
     )  # Changed from EncryptedCharField
     linked_transfer_id = models.IntegerField(null=True, blank=True)
+    
+    # Security Group Access Control (Phase 5.5)
+    security_group = models.ForeignKey(
+        'user_management.XX_SecurityGroup',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='budget_transfers',
+        help_text='Security group that has access to this transaction. If set, only members of this group can view/edit this transaction.'
+    )
 
     class Meta:
         db_table = "XX_BUDGET_TRANSFER_XX"
 
     def __str__(self):
         return f"Transfer {self.transaction_id}: {self.amount} requested by {self.requested_by} status {self.status}"
+    
+    def save(self, *args, **kwargs):
+        """
+        Override save to validate security group requirement before workflow submission.
+        """
+        # Check if status is changing to "submitted"
+        if self.pk:  # Existing record (update)
+            try:
+                old_instance = xx_BudgetTransfer.objects.get(pk=self.pk)
+                # If changing TO submitted status
+                if old_instance.status != "submitted" and self.status == "submitted":
+                    if not self.security_group_id:
+                        from django.core.exceptions import ValidationError
+                        raise ValidationError(
+                            f"Cannot submit transfer {self.code}: Security group is required. "
+                            "Please assign this transfer to a security group before submitting for approval."
+                        )
+            except xx_BudgetTransfer.DoesNotExist:
+                pass  # New record, no validation needed yet
+        
+        super().save(*args, **kwargs)
 
 
 # SELECT * FROM XX_BUDGET_TRANSFER_XX

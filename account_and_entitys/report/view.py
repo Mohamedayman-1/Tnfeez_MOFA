@@ -11,6 +11,8 @@ from django.db import transaction
 from django.db.models import Sum, Q, F, Value
 from django.db.models.functions import Coalesce
 from decimal import Decimal
+from user_management.managers.security_group_manager import SecurityGroupManager
+from user_management.managers import UserSegmentAccessManager
 
 
 class SegmentTransferAggregationView(APIView):
@@ -84,6 +86,71 @@ class SegmentTransferAggregationView(APIView):
         
         # Determine which Segment column to use (Segment1, Segment2, ..., Segment30)
         segment_column = f"Segment{segment_type_id}"
+        
+        # ====== ACCESS CONTROL: Check user's segment access ======
+        user = request.user
+        access_source = None
+        user_allowed_segment_codes = None
+        
+        # SuperAdmin bypass
+        if user.role == 1:  # SuperAdmin
+            access_source = 'superadmin'
+        else:
+            # Phase 5: Security Groups (preferred)
+            security_group_segments = SecurityGroupManager.get_user_accessible_segments(user)
+            
+            if security_group_segments and segment_type_id in security_group_segments:
+                user_allowed_segment_codes = security_group_segments[segment_type_id]
+                access_source = 'security_groups'
+            else:
+                # Phase 4: Direct Access (fallback)
+                access_result = UserSegmentAccessManager.get_user_allowed_segments(
+                    user=user,
+                    segment_type_id=segment_type_id
+                )
+                
+                if access_result and access_result.get('allowed_segment_codes'):
+                    user_allowed_segment_codes = access_result['allowed_segment_codes']
+                    access_source = 'direct_access'
+                else:
+                    access_source = 'no_access'
+                    user_allowed_segment_codes = []
+        
+        # If user has no access (and not SuperAdmin), return empty dataset
+        if access_source == 'no_access':
+            return Response({
+                "segment_type_id": segment_type_id,
+                "segment_column": segment_column,
+                "control_budget_name": control_budget_name,
+                "pagination": {
+                    "page": page,
+                    "page_size": page_size,
+                    "total_count": 0,
+                    "total_pages": 0,
+                    "has_next": False,
+                    "has_previous": False,
+                },
+                "summary": {
+                    "total_segments": 0,
+                    "grand_initial_budget": 0.0,
+                    "grand_total_decrease_fund": 0.0,
+                    "grand_total_from": 0.0,
+                    "grand_total_to": 0.0,
+                    "grand_total_additional_fund": 0.0,
+                    "grand_total_budget": 0.0,
+                    "grand_encumbrance": 0.0,
+                    "grand_Futures_column": 0.0,
+                    "grand_actual": 0.0,
+                    "grand_total_actual": 0.0,
+                    "grand_funds_available": 0.0,
+                    "grand_exchange_rate": 0.0,
+                },
+                "segments": [],
+                "access_control": {
+                    "access_source": access_source,
+                    "user_has_access": False,
+                }
+            }, status=status.HTTP_200_OK)
         
         # Get all transaction segments for the specified segment type
         transaction_segments = XX_TransactionSegment.objects.filter(
@@ -314,6 +381,14 @@ class SegmentTransferAggregationView(APIView):
         aggregation_list = list(aggregation.values())
         aggregation_list.sort(key=lambda x: x["segment_code"])
         
+        # ====== Apply access control filter to aggregation results ======
+        if access_source != 'superadmin' and user_allowed_segment_codes is not None:
+            # Filter aggregation to only include segments user has access to
+            aggregation_list = [
+                item for item in aggregation_list 
+                if item["segment_code"] in user_allowed_segment_codes
+            ]
+        
         # Apply segment_filter based on transfer/funds activity
         if segment_filter == "with_transfers":
             aggregation_list = [item for item in aggregation_list if item["segment_code"] in segments_with_transfers]
@@ -383,6 +458,11 @@ class SegmentTransferAggregationView(APIView):
                 "grand_exchange_rate": grand_exchange_rate,
             },
             "segments": paginated_segments,
+            "access_control": {
+                "access_source": access_source,
+                "user_has_access": True,
+                "filtered_by_access": access_source not in ['superadmin', None],
+            }
         }
         
         return Response(response_payload, status=status.HTTP_200_OK)

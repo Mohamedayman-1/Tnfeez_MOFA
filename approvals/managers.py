@@ -197,8 +197,21 @@ class ApprovalManager:
         Create assignments based on stage template filters.
         If no users found -> return empty list (caller should auto-skip).
         """
+        from user_management.models import XX_UserGroupMembership
+        
         st = stage_instance.stage_template
         qs = xx_User.objects.filter(is_active=True)  # only active users
+        
+        # Filter by security group if specified
+        if st.security_group:
+            # Get active members of the security group
+            member_user_ids = XX_UserGroupMembership.objects.filter(
+                security_group=st.security_group,
+                is_active=True
+            ).values_list('user_id', flat=True)
+            qs = qs.filter(id__in=member_user_ids)
+        
+        # Apply additional filters
         if st.required_user_level:
             qs = qs.filter(user_level=st.required_user_level)
         if st.required_role:

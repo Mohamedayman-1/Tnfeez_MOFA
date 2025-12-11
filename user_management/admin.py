@@ -13,7 +13,8 @@ from .models import (
     UserProjects,
     XX_UserSegmentAccess,
     XX_UserSegmentAbility,
-    xx_notification
+    xx_notification,
+    XX_SecurityGroup
 )
 
 
@@ -209,3 +210,13 @@ class NotificationAdmin(admin.ModelAdmin):
         """Show first 50 characters of message."""
         return obj.message[:50] + '...' if len(obj.message) > 50 else obj.message
     message_preview.short_description = "Message"
+
+
+@admin.register(XX_SecurityGroup)
+class SecurityGroupAdmin(admin.ModelAdmin):
+    """Admin interface for security groups - required for autocomplete in approvals."""
+    list_display = ('group_name', 'is_active', 'created_at')
+    list_filter = ('is_active', 'created_at')
+    search_fields = ('group_name', 'description')
+    readonly_fields = ('created_at', 'updated_at')
+    ordering = ('group_name',)

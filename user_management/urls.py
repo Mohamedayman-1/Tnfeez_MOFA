@@ -30,6 +30,23 @@ from .phase4_views import (
     MySegmentsView,
 )
 
+# Phase 5 imports - Security Groups
+from .views_security_groups import (
+    SecurityGroupListCreateView,
+    SecurityGroupDetailView,
+    SystemRolesView,
+    SecurityGroupRolesView,
+    SecurityGroupSegmentsView,
+    SecurityGroupMembersView,
+    MemberSegmentAssignmentView,
+    UserAccessibleSegmentsView,
+    UserMembershipsListView,
+    RoleAbilitiesView,
+    MemberAbilitiesView,
+    SecurityGroupAvailableUsersView,
+    SecurityGroupAvailableSegmentsView,
+)
+
 app_name = 'user_management'
 
 urlpatterns = [
@@ -90,6 +107,46 @@ urlpatterns = [
     path("phase4/required-segments/assign", AssignRequiredSegmentsView.as_view(), name="phase4-assign-required-segments"),
     path("phase4/required-segments/available", UserAvailableSegmentsView.as_view(), name="phase4-available-segments"),
     path("phase4/my-segments", MySegmentsView.as_view(), name="phase4-my-segments"),
+    
+    # =========================================================================
+    # Phase 5: Security Groups Management Endpoints
+    # =========================================================================
+    
+    # Security Groups CRUD
+    path('security-groups/', SecurityGroupListCreateView.as_view(), name='security-group-list'),
+    path('security-groups/<int:group_id>/', SecurityGroupDetailView.as_view(), name='security-group-detail'),
+    
+    # System Roles (for adding roles to security groups)
+    path('roles/', SystemRolesView.as_view(), name='system-roles'),
+    
+    # Group Roles Management
+    path('security-groups/<int:group_id>/roles/', SecurityGroupRolesView.as_view(), name='security-group-roles'),
+    path('security-groups/<int:group_id>/roles/<int:role_id>/', SecurityGroupRolesView.as_view(), name='security-group-role-delete'),
+    
+    # Role Abilities Management
+    path('security-groups/<int:group_id>/roles/<int:role_id>/abilities/', RoleAbilitiesView.as_view(), name='role-abilities'),
+    
+    # Group Segments Management
+    path('security-groups/<int:group_id>/segments/', SecurityGroupSegmentsView.as_view(), name='security-group-segments'),
+    path('security-groups/<int:group_id>/segments/<int:segment_id>/', SecurityGroupSegmentsView.as_view(), name='security-group-segment-delete'),
+    path('security-groups/<int:group_id>/available-segments/', SecurityGroupAvailableSegmentsView.as_view(), name='security-group-available-segments'),
+    
+    # Group Members Management
+    path('security-groups/<int:group_id>/members/', SecurityGroupMembersView.as_view(), name='security-group-members'),
+    path('security-groups/<int:group_id>/members/<int:membership_id>/', SecurityGroupMembersView.as_view(), name='security-group-member-update'),
+    path('security-groups/<int:group_id>/available-users/', SecurityGroupAvailableUsersView.as_view(), name='security-group-available-users'),
+    
+    # Member-Specific Segment Assignment (restricts member access within group)
+    path('security-groups/<int:group_id>/members/<int:membership_id>/segments/', MemberSegmentAssignmentView.as_view(), name='member-segment-assignment'),
+    
+    # Member-Specific Abilities (overrides role default abilities)
+    path('security-groups/<int:group_id>/members/<int:membership_id>/abilities/', MemberAbilitiesView.as_view(), name='member-abilities'),
+    
+    # User Access Query
+    path('users/<int:user_id>/accessible-segments/', UserAccessibleSegmentsView.as_view(), name='user-accessible-segments'),
+    
+    # User Memberships Query
+    path('users/<int:user_id>/memberships/', UserMembershipsListView.as_view(), name='user-memberships-list'),
     
     # path("chatbot/bot/", testChatbot.as_view(), name="chatbot"),
     # Notification management endpoints

@@ -76,10 +76,20 @@ class ApprovalWorkflowStageTemplate(models.Model):
 		"user_management.xx_UserLevel",
 		on_delete=models.PROTECT,
 		related_name="stage_templates",
+		null=True,
+		blank=True,
 		help_text="If set, assignments will include users with this level",
 	)
 	required_role = models.CharField(
 		max_length=50, null=True, blank=True, help_text="Optional user.role filter"
+	)
+	security_group = models.ForeignKey(
+		"user_management.XX_SecurityGroup",
+		on_delete=models.SET_NULL,
+		null=True,
+		blank=True,
+		related_name="approval_stage_templates",
+		help_text="If set, only members of this security group can approve at this stage"
 	)
 	dynamic_filter_json = models.TextField(
 		null=True,

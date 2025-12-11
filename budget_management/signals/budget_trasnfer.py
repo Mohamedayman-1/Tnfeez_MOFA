@@ -117,6 +117,14 @@ def create_workflow_instance(sender, instance, created, **kwargs):
         )
     else:
         if instance.status == "submitted":
+            # ====== SECURITY GROUP VALIDATION ======
+            # Require security group for workflow submission to ensure proper role-based filtering
+            if not instance.security_group_id:
+                print(f"[ERROR] Transfer {instance.code} cannot be submitted without a security group")
+                instance.status = "pending"  # Keep as pending, don't start workflow
+                instance.save(update_fields=["status"])
+                # Note: This will silently fail. Consider raising ValidationError in the view instead.
+                return
 
             instance.status = "pending"
             instance.save(update_fields=["status"])

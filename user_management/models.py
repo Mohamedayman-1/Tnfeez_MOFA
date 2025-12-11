@@ -5,6 +5,8 @@ from channels.layers import get_channel_layer
 from asgiref.sync import async_to_sync
 # Removed encrypted fields import - using standard Django fields now
 from account_and_entitys.models import XX_Entity, XX_SegmentType, XX_Segment
+
+
 class xx_UserManager(BaseUserManager):
     def create_user(self, username, password=None, role='user', user_level=None):
         if not username:
@@ -310,6 +312,368 @@ class XX_UserSegmentAbility(models.Model):
         
         return True
 
+
+# =============================================================================
+# PHASE 5: Security Group System (Enhanced User Management)
+# =============================================================================
+
+class XX_SecurityGroup(models.Model):
+    """
+    Security Group - Container for organizing users with specific roles and segment access.
+    Groups can have multiple roles and multiple segments assigned.
+    
+    Example: "Finance Team" group with roles (Accountant, Manager) and segments (Entity: 100, Account: 5000-5999)
+    """
+    group_name = models.CharField(
+        max_length=100,
+        unique=True,
+        help_text="Unique name for this security group (e.g., 'Finance Department', 'IT Team')"
+    )
+    description = models.TextField(
+        blank=True,
+        help_text="Description of this security group's purpose and responsibilities"
+    )
+    is_active = models.BooleanField(
+        default=True,
+        help_text="Whether this group is currently active"
+    )
+    created_at = models.DateTimeField(
+        auto_now_add=True,
+        help_text="When this group was created"
+    )
+    created_by = models.ForeignKey(
+        xx_User,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='created_security_groups',
+        help_text="User who created this group"
+    )
+    updated_at = models.DateTimeField(
+        auto_now=True,
+        help_text="Last update timestamp"
+    )
+    
+    class Meta:
+        db_table = 'XX_SECURITY_GROUP_XX'
+        ordering = ['group_name']
+        indexes = [
+            models.Index(fields=['group_name', 'is_active']),
+        ]
+    
+    def __str__(self):
+        return self.group_name
+    
+    def get_active_members_count(self):
+        """Get count of active users in this group."""
+        return self.user_memberships.filter(is_active=True).count()
+    
+    def get_total_roles_count(self):
+        """Get count of roles assigned to this group."""
+        return self.group_roles.filter(is_active=True).count()
+    
+    def get_total_segments_count(self):
+        """Get count of segments assigned to this group."""
+        return self.group_segments.filter(is_active=True).count()
+
+
+class XX_SecurityGroupRole(models.Model):
+    """
+    Roles available within a Security Group.
+    Links xx_UserLevel (roles) to Security Groups.
+    
+    When a user joins the group, they pick 1-2 roles from this list.
+    """
+    security_group = models.ForeignKey(
+        XX_SecurityGroup,
+        on_delete=models.CASCADE,
+        related_name='group_roles',
+        help_text="Security group this role belongs to"
+    )
+    role = models.ForeignKey(
+        xx_UserLevel,
+        on_delete=models.CASCADE,
+        related_name='security_group_assignments',
+        help_text="Role/user level available in this group"
+    )
+    default_abilities = models.JSONField(
+        default=list,
+        blank=True,
+        help_text="Default abilities for all users with this role. Example: ['TRANSFER', 'APPROVE']"
+    )
+    is_active = models.BooleanField(
+        default=True,
+        help_text="Whether this role is currently active in the group"
+    )
+    added_at = models.DateTimeField(
+        auto_now_add=True,
+        help_text="When this role was added to the group"
+    )
+    added_by = models.ForeignKey(
+        xx_User,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='added_group_roles',
+        help_text="User who added this role to the group"
+    )
+    
+    class Meta:
+        db_table = 'XX_SECURITY_GROUP_ROLE_XX'
+        unique_together = ('security_group', 'role')
+        ordering = ['security_group', 'role']
+        indexes = [
+            models.Index(fields=['security_group', 'is_active']),
+        ]
+    
+    def __str__(self):
+        return f"{self.security_group.group_name} - {self.role.name}"
+
+
+class XX_SecurityGroupSegment(models.Model):
+    """
+    Segments accessible by members of a Security Group.
+    Only REQUIRED segments can be assigned to groups.
+    
+    Users in the group will see only these segments (subset of all segments).
+    """
+    security_group = models.ForeignKey(
+        XX_SecurityGroup,
+        on_delete=models.CASCADE,
+        related_name='group_segments',
+        help_text="Security group this segment belongs to"
+    )
+    segment_type = models.ForeignKey(
+        XX_SegmentType,
+        on_delete=models.CASCADE,
+        related_name='security_group_assignments',
+        help_text="Type of segment (must be a required segment)"
+    )
+    segment = models.ForeignKey(
+        XX_Segment,
+        on_delete=models.CASCADE,
+        related_name='security_group_assignments',
+        help_text="Specific segment value accessible by this group"
+    )
+    is_active = models.BooleanField(
+        default=True,
+        help_text="Whether this segment is currently active in the group"
+    )
+    added_at = models.DateTimeField(
+        auto_now_add=True,
+        help_text="When this segment was added to the group"
+    )
+    added_by = models.ForeignKey(
+        xx_User,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='added_group_segments',
+        help_text="User who added this segment to the group"
+    )
+    
+    class Meta:
+        db_table = 'XX_SECURITY_GROUP_SEGMENT_XX'
+        unique_together = ('security_group', 'segment_type', 'segment')
+        ordering = ['security_group', 'segment_type', 'segment']
+        indexes = [
+            models.Index(fields=['security_group', 'is_active']),
+            models.Index(fields=['segment_type', 'is_active']),
+        ]
+    
+    def __str__(self):
+        return f"{self.security_group.group_name} - {self.segment_type.segment_name}: {self.segment.code}"
+    
+    def clean(self):
+        """Validate that segment belongs to the segment type and segment type is required."""
+        # Validate segment belongs to segment type
+        if self.segment.segment_type_id != self.segment_type.segment_id:
+            raise ValidationError({
+                'segment': f'Segment {self.segment.code} does not belong to segment type {self.segment_type.segment_name}'
+            })
+        
+        # Validate segment type is required
+        if not self.segment_type.is_required:
+            raise ValidationError({
+                'segment_type': f'Only required segment types can be assigned to security groups. {self.segment_type.segment_name} is not required.'
+            })
+    
+    def save(self, *args, **kwargs):
+        self.full_clean()
+        super().save(*args, **kwargs)
+
+
+class XX_UserGroupMembership(models.Model):
+    """
+    User membership in a Security Group with assigned roles.
+    
+    A user can:
+    - Belong to a security group
+    - Have 1-2 roles from the group's available roles
+    - See only the segments assigned to the group
+    """
+    user = models.ForeignKey(
+        xx_User,
+        on_delete=models.CASCADE,
+        related_name='group_memberships',
+        help_text="User who is a member of this group"
+    )
+    security_group = models.ForeignKey(
+        XX_SecurityGroup,
+        on_delete=models.CASCADE,
+        related_name='user_memberships',
+        help_text="Security group the user belongs to"
+    )
+    assigned_roles = models.ManyToManyField(
+        XX_SecurityGroupRole,
+        related_name='user_assignments',
+        help_text="Roles assigned to this user within the group (1-2 roles)",
+        blank=False
+    )
+    assigned_segments = models.ManyToManyField(
+        'XX_SecurityGroupSegment',
+        related_name='member_assignments',
+        blank=True,
+        help_text="Specific segments this member can access. If empty, member sees all group segments."
+    )
+    custom_abilities = models.JSONField(
+        default=list,
+        blank=True,
+        help_text="User-specific abilities override. If empty, uses role's default_abilities. Example: ['TRANSFER', 'APPROVE', 'VIEW']"
+    )
+    is_active = models.BooleanField(
+        default=True,
+        help_text="Whether this membership is currently active"
+    )
+    joined_at = models.DateTimeField(
+        auto_now_add=True,
+        help_text="When the user joined this group"
+    )
+    assigned_by = models.ForeignKey(
+        xx_User,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='assigned_group_memberships',
+        help_text="User who assigned this user to the group"
+    )
+    notes = models.TextField(
+        blank=True,
+        help_text="Additional notes about this membership"
+    )
+    
+    class Meta:
+        db_table = 'XX_USER_GROUP_MEMBERSHIP_XX'
+        unique_together = ('user', 'security_group')
+        ordering = ['security_group', 'user']
+        indexes = [
+            models.Index(fields=['user', 'is_active']),
+            models.Index(fields=['security_group', 'is_active']),
+        ]
+    
+    def __str__(self):
+        roles = ", ".join([r.role.name for r in self.assigned_roles.all()])
+        return f"{self.user.username} in {self.security_group.group_name} [{roles}]"
+    
+    def clean(self):
+        """Validate membership constraints."""
+        # Note: Role validation runs in post_add signal after M2M save
+        # Segment validation also runs in signal to check they belong to group
+        pass
+    
+    def validate_assigned_segments(self):
+        """Validate that assigned segments belong to this security group."""
+        if not self.pk:  # Not saved yet
+            return True, []
+        
+        errors = []
+        assigned_segs = self.assigned_segments.all()
+        
+        if assigned_segs.exists():
+            # Get all valid segment IDs for this group
+            valid_segment_ids = set(
+                XX_SecurityGroupSegment.objects.filter(
+                    security_group=self.security_group,
+                    is_active=True
+                ).values_list('id', flat=True)
+            )
+            
+            # Check each assigned segment
+            for seg_assignment in assigned_segs:
+                if seg_assignment.id not in valid_segment_ids:
+                    errors.append(
+                        f"Segment {seg_assignment.segment.code} does not belong to group {self.security_group.group_name}"
+                    )
+        
+        return len(errors) == 0, errors
+    
+    def get_accessible_segments(self):
+        """
+        Get segments accessible by this user through their group membership.
+        
+        If assigned_segments is set, returns only those specific segments.
+        Otherwise, returns all group segments.
+        
+        Returns:
+            QuerySet of XX_Segment objects
+        """
+        # Check if member has specific segment assignments
+        if self.assigned_segments.exists():
+            # Return only assigned segments
+            return XX_Segment.objects.filter(
+                security_group_assignments__in=self.assigned_segments.all(),
+                security_group_assignments__is_active=True
+            ).distinct()
+        else:
+            # Return all group segments (default behavior)
+            return XX_Segment.objects.filter(
+                security_group_assignments__security_group=self.security_group,
+                security_group_assignments__is_active=True
+            ).distinct()
+    
+    def get_assigned_role_names(self):
+        """Get list of assigned role names."""
+        return list(self.assigned_roles.values_list('role__name', flat=True))
+    
+    def get_effective_abilities(self):
+        """
+        Get effective abilities for this user.
+        
+        Logic:
+        1. If user has custom_abilities set → use those (user-specific override)
+        2. Otherwise → aggregate default_abilities from all assigned roles
+        
+        Returns:
+            list: Unique abilities (e.g., ['TRANSFER', 'APPROVE', 'VIEW'])
+        """
+        if self.custom_abilities:
+            # User has specific overrides
+            return self.custom_abilities
+        
+        # Aggregate from all assigned roles
+        abilities = set()
+        for role_assignment in self.assigned_roles.all():
+            if role_assignment.default_abilities:
+                abilities.update(role_assignment.default_abilities)
+        
+        return list(abilities)
+    
+    def has_ability(self, ability_type):
+        """
+        Check if user has a specific ability in this group.
+        
+        Args:
+            ability_type: Ability to check (e.g., 'TRANSFER', 'APPROVE')
+            
+        Returns:
+            bool: True if user has the ability
+        """
+        return ability_type in self.get_effective_abilities()
+
+
+# =============================================================================
+# NOTIFICATIONS
+# =============================================================================
 
 class xx_notification(models.Model):
     """Model to represent notifications for users."""

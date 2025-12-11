@@ -26,6 +26,8 @@ from django.db.models import Sum
 from public_funtion.update_pivot_fund import update_pivot_fund
 from django.utils import timezone
 from user_management.models import xx_notification
+from user_management.managers.security_group_manager import SecurityGroupManager
+from user_management.managers import UserSegmentAccessManager
 import pandas as pd
 import io
 import os
@@ -623,6 +625,11 @@ class TransactionTransferListView(APIView):
                 },
                 status=rest_framework.status.HTTP_400_BAD_REQUEST,
             )
+        
+        # ====== SECURITY GROUP ACCESS CONTROL ======
+        user = request.user
+        access_source = None
+        
         transaction_object=None
         try:
             transaction_object = xx_BudgetTransfer.objects.get(
@@ -636,6 +643,38 @@ class TransactionTransferListView(APIView):
                 },
                 status=rest_framework.status.HTTP_404_NOT_FOUND,
             )
+        
+        # Check if transaction is linked to a security group
+        if transaction_object.security_group:
+            # Transaction is restricted to a security group
+            if user.role == 1:  # SuperAdmin bypass
+                access_source = 'superadmin'
+            else:
+                # Check if user is a member of the transaction's security group
+                from user_management.models import XX_UserGroupMembership
+                
+                is_member = XX_UserGroupMembership.objects.filter(
+                    user=user,
+                    security_group=transaction_object.security_group,
+                    is_active=True
+                ).exists()
+                
+                if is_member:
+                    access_source = 'security_group_member'
+                else:
+                    # User is not a member of the required security group
+                    return Response(
+                        {
+                            "error": "Access denied",
+                            "message": f"This transaction is restricted to members of security group '{transaction_object.security_group.group_name}'",
+                            "security_group_id": transaction_object.security_group.group_id,
+                            "security_group_name": transaction_object.security_group.group_name
+                        },
+                        status=rest_framework.status.HTTP_403_FORBIDDEN,
+                    )
+        else:
+            # No security group restriction - accessible to all authenticated users
+            access_source = 'no_restriction'
           
         status = False
         if transaction_object.code[0:3] != "FAD":
@@ -668,6 +707,7 @@ class TransactionTransferListView(APIView):
 
         transfers = xx_TransactionTransfer.objects.filter(transaction=transaction_id)
         budget=xx_BudgetTransfer.objects.get(transaction_id=transaction_id)
+        
         # Use TransactionTransferDynamicSerializer for full segment details
         serializer = TransactionTransferDynamicSerializer(transfers, many=True)
 
@@ -1070,12 +1110,20 @@ class TransactionTransferListView(APIView):
                         # Calculate remaining for this segment combination
                         segment_remaining = original_amount - segment_total_used
                         
+                        # Cap total_used at original_amount if over-utilized, set remaining to 0
+                        if segment_total_used > original_amount:
+                            display_total_used = float(original_amount)
+                            display_remaining = 0.0
+                        else:
+                            display_total_used = float(segment_total_used)
+                            display_remaining = float(segment_remaining)
+                        
                         segment_usage.append({
                             "transfer_line_id": hfr_transfer.transfer_id,
                             "segments": segment_details,
                             "original_hold": float(original_amount),
-                            "total_used": float(segment_total_used),
-                            "remaining": float(segment_remaining),
+                            "total_used": display_total_used,
+                            "remaining": display_remaining,
                             "percentage_used": float((segment_total_used / original_amount * 100) if original_amount > 0 else 0),
                             "far_usage": far_usage_details,
                             "can_unhold": segment_remaining > 0
@@ -1084,19 +1132,25 @@ class TransactionTransferListView(APIView):
                     # Overall summary
                     overall_remaining = overall_original_hold - overall_total_used
                     
+                    # Cap total_used at original_hold if over-utilized, set remaining to 0
+                    if overall_total_used > overall_original_hold:
+                        display_overall_total_used = float(overall_original_hold)
+                        display_overall_remaining = 0.0
+                    else:
+                        display_overall_total_used = float(overall_total_used)
+                        display_overall_remaining = float(overall_remaining)
+                    
                     # Generate suggestion message
                     if overall_remaining > 0:
                         suggestion = f"You have {overall_remaining:,.2f} remaining in hold across all segments. You can unhold it or create a new FAR transfer."
-                    elif overall_remaining == 0:
-                        suggestion = "This HFR hold has been fully used across all segments. No remaining funds to unhold."
                     else:
-                        suggestion = f"Warning: Over-utilized by {abs(overall_remaining):,.2f}. Total used exceeds original hold amount."
+                        suggestion = "This HFR hold has been fully used across all segments. No remaining funds to unhold."
                     
                     # Add HFR tracking info to summary
                     summary["History"] = {
                         "original_hold": float(overall_original_hold),
-                        "total_used": float(overall_total_used),
-                        "remaining_in_hold": float(overall_remaining),
+                        "total_used": display_overall_total_used,
+                        "remaining_in_hold": display_overall_remaining,
                         "can_unhold_remaining": overall_remaining > 0,
                         "segment_breakdown": segment_usage,
                         "total_segments": len(segment_usage),
@@ -1121,7 +1175,17 @@ class TransactionTransferListView(APIView):
 
             status = {"status": status}
             return Response(
-                {"summary": summary, "transfers": response_data, "status": status}
+                {
+                    "summary": summary, 
+                    "transfers": response_data, 
+                    "status": status,
+                    "access_control": {
+                        "access_source": access_source,
+                        "security_group_id": transaction_object.security_group.group_id if transaction_object.security_group else None,
+                        "security_group_name": transaction_object.security_group.group_name if transaction_object.security_group else None,
+                        "is_restricted": transaction_object.security_group is not None
+                    }
+                }
             )
         else:
             summary = {
@@ -1141,7 +1205,17 @@ class TransactionTransferListView(APIView):
             }
             status = {"status": status}
             return Response(
-                {"summary": summary, "transfers": response_data, "status": status}
+                {
+                    "summary": summary, 
+                    "transfers": response_data, 
+                    "status": status,
+                    "access_control": {
+                        "access_source": access_source,
+                        "security_group_id": transaction_object.security_group.group_id if transaction_object.security_group else None,
+                        "security_group_name": transaction_object.security_group.group_name if transaction_object.security_group else None,
+                        "is_restricted": transaction_object.security_group is not None
+                    }
+                }
             )
 
 

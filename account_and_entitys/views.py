@@ -437,6 +437,7 @@ class SegmentListView(APIView):
 
     def get(self, request):
         from user_management.managers import UserSegmentAccessManager
+        from user_management.managers.security_group_manager import SecurityGroupManager
         
         search_query = request.query_params.get("search", None)
         filter_type = request.query_params.get("filter", "all").lower()
@@ -496,33 +497,46 @@ class SegmentListView(APIView):
             is_active=True
         )
         
-        # ACCESS CONTROL: Filter segments based on user access
+        # ACCESS CONTROL: Filter segments based on user access (Phase 4 + Phase 5)
         # SuperAdmin can bypass with bypass_access_filter=true parameter
         # All other users (including superadmin without bypass) are filtered by their assigned segments
         user_access_applied = False
         user_allowed_segment_codes = []
+        access_source = None
         
         # Determine if we should apply access filter
         # Only superadmin with bypass_access_filter=true skips the filter
         should_apply_access_filter = not (is_superadmin and bypass_access_filter)
         
         if should_apply_access_filter:
-            # Get user's allowed segments for this segment type
-            access_result = UserSegmentAccessManager.get_user_allowed_segments(
-                user=user,
-                segment_type_id=segment_type_obj.segment_id,
-                access_level=None,  # Any access level allows viewing
-                include_inactive=False
-            )
+            # PHASE 5: First try Security Groups (preferred method)
+            security_group_segments = SecurityGroupManager.get_user_accessible_segments(user)
             
-            if access_result['success'] and access_result['segments']:
-                user_allowed_segment_codes = [seg['segment_code'] for seg in access_result['segments']]
+            if security_group_segments and segment_type_obj.segment_id in security_group_segments:
+                # User has security group access
+                user_allowed_segment_codes = security_group_segments[segment_type_obj.segment_id]
                 segments = segments.filter(code__in=user_allowed_segment_codes)
                 user_access_applied = True
+                access_source = 'security_groups'
             else:
-                # User has no access to any segments of this type - return empty
-                segments = segments.none()
-                user_access_applied = True
+                # PHASE 4: Fallback to direct user segment access (legacy)
+                access_result = UserSegmentAccessManager.get_user_allowed_segments(
+                    user=user,
+                    segment_type_id=segment_type_obj.segment_id,
+                    access_level=None,  # Any access level allows viewing
+                    include_inactive=False
+                )
+                
+                if access_result['success'] and access_result['segments']:
+                    user_allowed_segment_codes = [seg['segment_code'] for seg in access_result['segments']]
+                    segments = segments.filter(code__in=user_allowed_segment_codes)
+                    user_access_applied = True
+                    access_source = 'direct_access'
+                else:
+                    # User has no access to any segments of this type - return empty
+                    segments = segments.none()
+                    user_access_applied = True
+                    access_source = 'no_access'
 
         # Apply filter based on filter_type parameter
         if filter_type in ['root', 'zero_level']:
@@ -614,6 +628,7 @@ class SegmentListView(APIView):
                 "access_control": {
                     "user_is_superadmin": is_superadmin,
                     "access_filter_applied": user_access_applied,
+                    "access_source": access_source,  # 'security_groups', 'direct_access', or 'no_access'
                     "user_allowed_segments_count": len(user_allowed_segment_codes) if user_access_applied else None,
                     "bypass_access_filter": bypass_access_filter if is_superadmin else None
                 }

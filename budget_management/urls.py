@@ -16,6 +16,7 @@ from .views import (
     list_budget_transfer_reject_reason,
     DashboardBudgetTransferView,
     ListBudgetTransfer_approvels_MobileView,
+    TransactionSecurityGroupView,
 )
 
 app_name = "budget_management"
@@ -101,4 +102,11 @@ urlpatterns = [
     ),
 
     path("transfers/Oracle/Status/", Oracle_Status.as_view()),
+    
+    # Security group management for transactions
+    path(
+        "transfers/<int:transaction_id>/security-group/",
+        TransactionSecurityGroupView.as_view(),
+        name="transaction-security-group",
+    ),
 ]

@@ -149,6 +149,26 @@ class CreateBudgetTransferView(APIView):
         serializer = BudgetTransferSerializer(data=request.data)
 
         if serializer.is_valid():
+            # ====== AUTO-ASSIGN SECURITY GROUP ======
+            # Automatically assign security group based on user's membership
+            # If user belongs to multiple groups, use the first active one (or allow user to specify)
+            from user_management.models import XX_UserGroupMembership
+            
+            # Check if user explicitly provided security_group in request
+            security_group_id = request.data.get('security_group')
+            
+            if not security_group_id:
+                # Auto-assign from user's first active security group
+                user_membership = XX_UserGroupMembership.objects.filter(
+                    user=request.user,
+                    is_active=True
+                ).first()
+                
+                if user_membership:
+                    security_group_id = user_membership.security_group_id
+                    print(f"[AUTO-ASSIGN] Setting security_group_id={security_group_id} for user {request.user.username}")
+                else:
+                    print(f"[WARNING] User {request.user.username} has no active security group membership")
 
             transfer = serializer.save(
                 requested_by=request.user.username,
@@ -158,7 +178,8 @@ class CreateBudgetTransferView(APIView):
                 code=new_code,
                 control_budget=transfer_control_budget,
                 transfer_type=transfer_type,
-                linked_transfer_id=linked_budget_transfer
+                linked_transfer_id=linked_budget_transfer,
+                security_group_id=security_group_id
             )
             if linked_budget_transfer:
                 from account_and_entitys.models import XX_TransactionSegment
@@ -279,7 +300,40 @@ class ListBudgetTransferView(APIView):
         code = request.query_params.get("code", None)
         print( f"code value: {code} ({type(code)})")
 
-        transfers = xx_BudgetTransfer.objects.all()
+        # ====== SECURITY GROUP FILTERING ======
+        user = request.user
+        
+        # SuperAdmin sees everything
+        if user.role == 1:
+            transfers = xx_BudgetTransfer.objects.all()
+        else:
+            # Get user's security group memberships
+            from user_management.models import XX_UserGroupMembership
+            
+            user_groups = XX_UserGroupMembership.objects.filter(
+                user=user,
+                is_active=True
+            ).values_list('security_group_id', flat=True)
+            
+            if not user_groups:
+                # User has no security group - return empty queryset
+                return Response(
+                    {
+                        "error": "Access denied",
+                        "message": "You are not a member of any security group. Please contact an administrator.",
+                        "results": [],
+                        "count": 0,
+                        "next": None,
+                        "previous": None
+                    },
+                    status=status.HTTP_403_FORBIDDEN
+                )
+            
+            # Filter transactions to only those in user's security groups OR with no security group restriction
+            transfers = xx_BudgetTransfer.objects.filter(
+                Q(security_group_id__in=user_groups) | Q(security_group__isnull=True)
+            )
+        
         # Apply user restriction if not admin
         if not IsAdmin().has_permission(request, self):
             transfers = transfers.filter(user_id=request.user.id)
@@ -570,13 +624,158 @@ class ListBudgetTransfer_approvels_View(APIView):
         if code is None:
             code = "FAR"
         
+        # ====== SECURITY GROUP & APPROVAL PERMISSION CHECK ======
+        user = request.user
+        
+        # SuperAdmin bypasses all security group checks
+        user_memberships = None
+        if user.role == 1:
+            user_approval_groups = None  # None = see all groups
+        else:
+            # Check if user has approval permissions
+            from user_management.models import XX_UserGroupMembership
+            
+            # Get user's security group memberships with approval access
+            # Check custom_abilities or role's default_abilities for 'APPROVE'
+            user_memberships = XX_UserGroupMembership.objects.filter(
+                user=user,
+                is_active=True
+            ).prefetch_related('assigned_roles')
+            
+            user_approval_groups = []
+            for membership in user_memberships:
+                # Check custom_abilities first
+                if membership.custom_abilities and 'APPROVE' in membership.custom_abilities:
+                    user_approval_groups.append(membership.security_group_id)
+                    continue
+                
+                # Check role's default_abilities
+                for role in membership.assigned_roles.all():
+                    if role.is_active and role.default_abilities and 'APPROVE' in role.default_abilities:
+                        user_approval_groups.append(membership.security_group_id)
+                        break
+            
+            if not user_approval_groups:
+                # User has no approval access in any security group
+                print(f"DEBUG: User {user.username} (ID: {user.id}) has no APPROVE permissions")
+                print(f"DEBUG: User memberships: {user_memberships.count()}")
+                for membership in user_memberships:
+                    print(f"  - Group: {membership.security_group.group_name}")
+                    print(f"    Custom abilities: {membership.custom_abilities}")
+                    for role in membership.assigned_roles.all():
+                        print(f"    Role: {role.role.name}, Active: {role.is_active}, Abilities: {role.default_abilities}")
+                
+                return Response(
+                    {
+                        "success": False,
+                        "error": "ACCESS_DENIED",
+                        "message": "You do not have approval permissions. Please contact your administrator to grant you approval access in a security group.",
+                        "details": "Your account is not assigned to any security group with approval permissions.",
+                        "results": []
+                    },
+                    status=status.HTTP_403_FORBIDDEN
+                )
+        
         # Initialize combined data list
         all_data = []
         
         # If status filter is "pending" or None, include pending transfers
         if status_filter in [None, "pending"]:
-            # Get pending transfers for this user
+            # Get pending transfers for this user (already filtered by ApprovalManager)
+            # This returns transfers where user has pending assignments in active stages
             pending_transfers = ApprovalManager.get_user_pending_approvals(request.user)
+            
+            # Additional filter: only transfers from user's approval security groups (skip for SuperAdmin)
+            if user_approval_groups is not None:
+                # Further filter: user must be assigned to stages that match their role in security group
+                from approvals.models import ApprovalWorkflowStageInstance, ApprovalAssignment
+                
+                # Get user's roles in each security group
+                user_roles_by_group = {}
+                if user_memberships:
+                    for membership in user_memberships:
+                        group_id = membership.security_group_id
+                        user_roles_by_group[group_id] = list(
+                            membership.assigned_roles.values_list('role_id', flat=True)
+                        )
+                
+                # Build list of transfer IDs where user's stage assignment matches their role
+                valid_transfer_ids = []
+                print(f"\n=== DEBUG: Role-based filtering for user {user.username} ===")
+                print(f"User's roles by group: {user_roles_by_group}")
+                
+                for transfer in pending_transfers:
+                    workflow_instance = getattr(transfer, 'workflow_instance', None)
+                    if not workflow_instance:
+                        continue
+                    
+                    transfer_group_id = transfer.security_group_id
+                    print(f"\n--- Transfer {transfer.code} (ID: {transfer.transaction_id}) ---")
+                    print(f"Transfer security_group_id: {transfer_group_id}")
+                    
+                    # Check if transfer belongs to user's security groups
+                    if transfer_group_id not in user_approval_groups and transfer_group_id is not None:
+                        print(f"❌ Transfer group {transfer_group_id} not in user's approval groups {user_approval_groups}")
+                        continue
+                    
+                    # Get user's active pending assignments for this transfer
+                    user_assignments = ApprovalAssignment.objects.filter(
+                        user=request.user,
+                        status=ApprovalAssignment.STATUS_PENDING,
+                        stage_instance__workflow_instance=workflow_instance,
+                        stage_instance__status=ApprovalWorkflowStageInstance.STATUS_ACTIVE
+                    ).select_related('stage_instance__stage_template', 'stage_instance__stage_template__required_user_level')
+                    
+                    print(f"User has {user_assignments.count()} pending assignments for this transfer")
+                    
+                    # Check if any assignment matches user's role in the security group
+                    for assignment in user_assignments:
+                        stage_template = assignment.stage_instance.stage_template
+                        required_level_id = stage_template.required_user_level_id
+                        required_level_name = stage_template.required_user_level.name if stage_template.required_user_level else None
+                        
+                        print(f"  Stage: {stage_template.name}")
+                        print(f"  Required level ID: {required_level_id} (Name: {required_level_name})")
+                        
+                        # If no required level, allow (open to all)
+                        if not required_level_id:
+                            print(f"  ✅ No required level - ALLOWED")
+                            valid_transfer_ids.append(transfer.transaction_id)
+                            break
+                        
+                        # If transfer has security group, check user's roles in that group
+                        if transfer_group_id and transfer_group_id in user_roles_by_group:
+                            user_role_ids = user_roles_by_group[transfer_group_id]
+                            print(f"  User's role IDs in group {transfer_group_id}: {user_role_ids}")
+                            if required_level_id in user_role_ids:
+                                print(f"  ✅ Role match found - ALLOWED")
+                                valid_transfer_ids.append(transfer.transaction_id)
+                                break
+                            else:
+                                print(f"  ❌ Required level {required_level_id} NOT in user's roles {user_role_ids}")
+                        # If no security group on transfer, check user's roles in any group
+                        elif not transfer_group_id:
+                            print(f"  Transfer has no security group - checking all user groups")
+                            for group_id, group_roles in user_roles_by_group.items():
+                                print(f"    Group {group_id} roles: {group_roles}")
+                                if required_level_id in group_roles:
+                                    print(f"  ✅ Role match found in group {group_id} - ALLOWED")
+                                    valid_transfer_ids.append(transfer.transaction_id)
+                                    break
+                            else:
+                                print(f"  ❌ Required level {required_level_id} NOT in any user group")
+                                continue
+                            break
+                
+                print(f"\n=== Valid transfer IDs after role filtering: {valid_transfer_ids} ===\n")
+                
+                # Filter to only valid transfers
+                pending_transfers = pending_transfers.filter(transaction_id__in=valid_transfer_ids)
+            else:
+                # SuperAdmin: apply basic security group filter
+                pending_transfers = pending_transfers.filter(
+                    Q(security_group_id__isnull=True) | Q(security_group__isnull=False)
+                )
 
             if request.user.abilities_legacy.count() > 0:
                 pending_transfers = filter_budget_transfers_all_in_entities(
@@ -607,19 +806,84 @@ class ListBudgetTransfer_approvels_View(APIView):
         # If status filter is "history" or None, include history transfers
         if status_filter in [None, "history"]:
             # Get history transfers (approved or rejected) that were assigned to this user
-            from approvals.models import ApprovalAction, ApprovalWorkflowStageInstance
+            from approvals.models import ApprovalAction, ApprovalWorkflowStageInstance, ApprovalAssignment
             
-            # Get all workflow stage instances where this user was assigned as approver
-            user_stage_instances = ApprovalWorkflowStageInstance.objects.filter(
-                assignments__user=request.user
-            ).values_list('workflow_instance__budget_transfer_id', flat=True)
+            # Additional filter: only transfers from user's approval security groups (skip for SuperAdmin)
+            if user_approval_groups is not None:
+                # Get user's roles in each security group
+                user_roles_by_group = {}
+                if user_memberships:
+                    for membership in user_memberships:
+                        group_id = membership.security_group_id
+                        user_roles_by_group[group_id] = list(
+                            membership.assigned_roles.values_list('role_id', flat=True)
+                        )
+                
+                # Get all assignments for this user where they participated
+                user_assignments = ApprovalAssignment.objects.filter(
+                    user=request.user
+                ).exclude(
+                    status=ApprovalAssignment.STATUS_PENDING
+                ).select_related(
+                    'stage_instance__workflow_instance__budget_transfer',
+                    'stage_instance__stage_template'
+                )
+                
+                # Filter assignments where user's role matched the stage requirement
+                valid_transfer_ids = []
+                for assignment in user_assignments:
+                    transfer = assignment.stage_instance.workflow_instance.budget_transfer
+                    
+                    # Only include finished transfers
+                    if transfer.status not in ["approved", "rejected"]:
+                        continue
+                    
+                    transfer_group_id = transfer.security_group_id
+                    
+                    # Check if transfer belongs to user's security groups
+                    if transfer_group_id not in user_approval_groups and transfer_group_id is not None:
+                        continue
+                    
+                    stage_template = assignment.stage_instance.stage_template
+                    required_level_id = stage_template.required_user_level_id
+                    
+                    # If no required level, allow (open to all)
+                    if not required_level_id:
+                        valid_transfer_ids.append(transfer.transaction_id)
+                        continue
+                    
+                    # If transfer has security group, check user's roles in that group
+                    if transfer_group_id and transfer_group_id in user_roles_by_group:
+                        user_role_ids = user_roles_by_group[transfer_group_id]
+                        if required_level_id in user_role_ids:
+                            valid_transfer_ids.append(transfer.transaction_id)
+                    # If no security group on transfer, check user's roles in any group
+                    elif not transfer_group_id:
+                        for group_roles in user_roles_by_group.values():
+                            if required_level_id in group_roles:
+                                valid_transfer_ids.append(transfer.transaction_id)
+                                break
+                
+                # Get unique transfer IDs
+                valid_transfer_ids = list(set(valid_transfer_ids))
+                
+                # Get the budget transfers
+                history_transfers = xx_BudgetTransfer.objects.filter(
+                    transaction_id__in=valid_transfer_ids
+                ).filter(
+                    Q(status="approved") | Q(status="rejected")
+                )
+            else:
+                # SuperAdmin: get all history where user was assigned
+                user_stage_instances = ApprovalWorkflowStageInstance.objects.filter(
+                    assignments__user=request.user
+                ).values_list('workflow_instance__budget_transfer_id', flat=True)
 
-            # Get the budget transfers that are finished (approved or rejected)
-            history_transfers = xx_BudgetTransfer.objects.filter(
-                transaction_id__in=user_stage_instances
-            ).filter(
-                Q(status="approved") | Q(status="rejected")
-            )
+                history_transfers = xx_BudgetTransfer.objects.filter(
+                    transaction_id__in=user_stage_instances
+                ).filter(
+                    Q(status="approved") | Q(status="rejected")
+                )
 
             if request.user.abilities_legacy.count() > 0:
                 history_transfers = filter_budget_transfers_all_in_entities(
@@ -764,7 +1028,7 @@ class UpdateBudgetTransferView(APIView):
                 )
 
             # Allow only specific fields to be updated
-            allowed_fields = {"notes", "description_x", "amount", "transaction_date"}
+            allowed_fields = {"notes", "description_x", "amount", "transaction_date", "security_group"}
             update_data = {k: v for k, v in request.data.items() if k in allowed_fields}
 
             if not update_data:
@@ -1971,4 +2235,124 @@ class Oracle_Status(APIView):
             return Response(
                 {"error": str(e)}, 
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
+
+class TransactionSecurityGroupView(APIView):
+    "Manage security group assignment for budget transactions"
+    
+    permission_classes = [IsAuthenticated]
+    
+    def get(self, request, transaction_id):
+        "Get the security group assigned to a transaction"
+        try:
+            transaction = xx_BudgetTransfer.objects.select_related('security_group').get(
+                transaction_id=transaction_id
+            )
+            
+            if transaction.security_group:
+                return Response({
+                    "transaction_id": transaction_id,
+                    "security_group": {
+                        "group_id": transaction.security_group.group_id,
+                        "group_name": transaction.security_group.group_name,
+                        "description": transaction.security_group.description,
+                        "is_active": transaction.security_group.is_active
+                    },
+                    "is_restricted": True
+                }, status=status.HTTP_200_OK)
+            else:
+                return Response({
+                    "transaction_id": transaction_id,
+                    "security_group": None,
+                    "is_restricted": False,
+                    "message": "This transaction is accessible to all users"
+                }, status=status.HTTP_200_OK)
+                
+        except xx_BudgetTransfer.DoesNotExist:
+            return Response(
+                {"error": "Transaction not found"},
+                status=status.HTTP_404_NOT_FOUND
+            )
+    
+    def put(self, request, transaction_id):
+        "Assign or change security group for a transaction"
+        try:
+            transaction = xx_BudgetTransfer.objects.get(transaction_id=transaction_id)
+            
+            # Permission check: Only transaction owner or admin can assign security group
+            if request.user.role not in [1, 2] and transaction.user_id != request.user.id:
+                return Response(
+                    {"error": "You don't have permission to modify this transaction's security group"},
+                    status=status.HTTP_403_FORBIDDEN
+                )
+            
+            security_group_id = request.data.get('security_group_id')
+            
+            if security_group_id:
+                # Validate security group exists
+                from user_management.models import XX_SecurityGroup
+                try:
+                    security_group = XX_SecurityGroup.objects.get(group_id=security_group_id, is_active=True)
+                    transaction.security_group = security_group
+                    transaction.save()
+                    
+                    return Response({
+                        "message": f"Transaction {transaction_id} assigned to security group '{security_group.group_name}'",
+                        "transaction_id": transaction_id,
+                        "security_group": {
+                            "group_id": security_group.group_id,
+                            "group_name": security_group.group_name,
+                            "description": security_group.description
+                        }
+                    }, status=status.HTTP_200_OK)
+                    
+                except XX_SecurityGroup.DoesNotExist:
+                    return Response(
+                        {"error": f"Security group with ID {security_group_id} not found or inactive"},
+                        status=status.HTTP_404_NOT_FOUND
+                    )
+            else:
+                return Response(
+                    {"error": "security_group_id is required"},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+                
+        except xx_BudgetTransfer.DoesNotExist:
+            return Response(
+                {"error": "Transaction not found"},
+                status=status.HTTP_404_NOT_FOUND
+            )
+    
+    def delete(self, request, transaction_id):
+        "Remove security group restriction from a transaction"
+        try:
+            transaction = xx_BudgetTransfer.objects.get(transaction_id=transaction_id)
+            
+            # Permission check: Only transaction owner or admin
+            if request.user.role not in [1, 2] and transaction.user_id != request.user.id:
+                return Response(
+                    {"error": "You don't have permission to modify this transaction's security group"},
+                    status=status.HTTP_403_FORBIDDEN
+                )
+            
+            if transaction.security_group:
+                group_name = transaction.security_group.group_name
+                transaction.security_group = None
+                transaction.save()
+                
+                return Response({
+                    "message": f"Security group restriction removed. Transaction {transaction_id} is now accessible to all users",
+                    "transaction_id": transaction_id,
+                    "previous_group": group_name
+                }, status=status.HTTP_200_OK)
+            else:
+                return Response({
+                    "message": "Transaction already has no security group restriction",
+                    "transaction_id": transaction_id
+                }, status=status.HTTP_200_OK)
+                
+        except xx_BudgetTransfer.DoesNotExist:
+            return Response(
+                {"error": "Transaction not found"},
+                status=status.HTTP_404_NOT_FOUND
             )

@@ -4,6 +4,8 @@ from rest_framework.response import Response
 from rest_framework import status
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.pagination import PageNumberPagination
+from user_management.managers.security_group_manager import SecurityGroupManager
+from user_management.managers import UserSegmentAccessManager
 
 from budget_management.models import (
     get_entities_with_children,
@@ -180,10 +182,48 @@ class get_segment_fund(APIView):
         # Build filter dynamically for all 30 segments
         filters = {}
 
+        # ====== ACCESS CONTROL: Get user's accessible segments ======
+        user = request.user
+        user_accessible_segments = {}  # {segment_type_id: [segment_codes]}
+        
+        # SuperAdmin bypass
+        if user.role != 1:  # Not SuperAdmin
+            # Phase 5: Security Groups (preferred)
+            security_group_segments = SecurityGroupManager.get_user_accessible_segments(user)
+            
+            if security_group_segments:
+                user_accessible_segments = security_group_segments
+            else:
+                # Phase 4: Direct Access (fallback)
+                # Build accessible segments for all types
+                for i in range(1, 31):
+                    access_result = UserSegmentAccessManager.get_user_allowed_segments(
+                        user=user,
+                        segment_type_id=i
+                    )
+                    if access_result and access_result.get('allowed_segment_codes'):
+                        user_accessible_segments[i] = access_result['allowed_segment_codes']
 
         for i in range(1, 31):
             segment_param = request.query_params.get(f"Segment{i}", None)
             if segment_param:
+                # Check if user has access to this segment type and value
+                if user.role != 1:  # Not SuperAdmin
+                    if i in user_accessible_segments:
+                        # User has access to this segment type - check if they can see this specific code
+                        if segment_param not in user_accessible_segments[i]:
+                            # User doesn't have access to this specific segment code
+                            return Response(
+                                {
+                                    "error": f"Access denied to Segment{i}={segment_param}",
+                                    "message": "You don't have permission to view this segment",
+                                    "accessible_segments": user_accessible_segments.get(i, [])
+                                },
+                                status=status.HTTP_403_FORBIDDEN
+                            )
+                    # If segment type not in user_accessible_segments, it means no access at all
+                    # Allow query to proceed (will return empty result if they have no access)
+                
                 filters[f'Segment{i}'] = segment_param
         
         # Get total count first for debugging
@@ -191,6 +231,20 @@ class get_segment_fund(APIView):
         
         # Get filtered segment funds (or all if no filters)
         segment_funds = XX_Segment_Funds.objects.filter(**filters)
+        
+        # ====== Filter results by user's accessible segments ======
+        if user.role != 1 and user_accessible_segments:  # Not SuperAdmin
+            # Build Q filter for accessible segments
+            from django.db.models import Q
+            accessible_filter = Q()
+            
+            for segment_type_id, segment_codes in user_accessible_segments.items():
+                segment_field = f"Segment{segment_type_id}"
+                # Add OR condition: this segment field is in the allowed codes
+                accessible_filter |= Q(**{f"{segment_field}__in": segment_codes})
+            
+            if accessible_filter:
+                segment_funds = segment_funds.filter(accessible_filter)
         
         # Build response data
         results = []
@@ -227,7 +281,12 @@ class get_segment_fund(APIView):
                 "count": len(results),
                 "total_records_in_db": total_records,
                 "filters_applied": filters,
-                "data": results
+                "data": results,
+                "access_control": {
+                    "user_is_superadmin": user.role == 1,
+                    "access_filtered": user.role != 1 and bool(user_accessible_segments),
+                    "accessible_segment_types": list(user_accessible_segments.keys()) if user.role != 1 else "all"
+                }
             },
             status=status.HTTP_200_OK
         )
@@ -244,6 +303,28 @@ class get_segments_fund(APIView):
 
     def get(self, request):
         filters = {}
+        
+        # ====== ACCESS CONTROL: Get user's accessible segments ======
+        user = request.user
+        user_accessible_segments = {}  # {segment_type_id: [segment_codes]}
+        
+        # SuperAdmin bypass
+        if user.role != 1:  # Not SuperAdmin
+            # Phase 5: Security Groups (preferred)
+            security_group_segments = SecurityGroupManager.get_user_accessible_segments(user)
+            
+            if security_group_segments:
+                user_accessible_segments = security_group_segments
+            else:
+                # Phase 4: Direct Access (fallback)
+                # Build accessible segments for all types
+                for i in range(1, 31):
+                    access_result = UserSegmentAccessManager.get_user_allowed_segments(
+                        user=user,
+                        segment_type_id=i
+                    )
+                    if access_result and access_result.get('allowed_segment_codes'):
+                        user_accessible_segments[i] = access_result['allowed_segment_codes']
 
         control_budget_name = request.query_params.get("control_budget_name")
         period_name = request.query_params.get("period_name")
@@ -293,6 +374,21 @@ class get_segments_fund(APIView):
                 filters[f'Segment{i}__istartswith'] = segment_param
 
         segment_funds = XX_Segment_Funds.objects.filter(**filters)
+        
+        # ====== Filter results by user's accessible segments ======
+        if user.role != 1 and user_accessible_segments:  # Not SuperAdmin
+            # Build Q filter for accessible segments
+            from django.db.models import Q
+            accessible_filter = Q()
+            
+            for segment_type_id, segment_codes in user_accessible_segments.items():
+                segment_field = f"Segment{segment_type_id}"
+                # Add OR condition: this segment field is in the allowed codes
+                accessible_filter |= Q(**{f"{segment_field}__in": segment_codes})
+            
+            if accessible_filter:
+                segment_funds = segment_funds.filter(accessible_filter)
+        
         total_records = segment_funds.count()
 
         paginator = self.pagination_class()
@@ -344,6 +440,11 @@ class get_segments_fund(APIView):
                 "page": paginator.page.number,
                 "page_size": paginator.get_page_size(request),
                 "data": results,
+                "access_control": {
+                    "user_is_superadmin": user.role == 1,
+                    "access_filtered": user.role != 1 and bool(user_accessible_segments),
+                    "accessible_segment_types": list(user_accessible_segments.keys()) if user.role != 1 else "all"
+                }
             },
             status=status.HTTP_200_OK,
         )

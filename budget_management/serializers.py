@@ -2,6 +2,10 @@ from rest_framework import serializers
 from .models import xx_BudgetTransfer,xx_budget_integration_audit
 
 class BudgetTransferSerializer(serializers.ModelSerializer):
+    # Add nested representation for security_group
+    security_group_name = serializers.CharField(source='security_group.group_name', read_only=True)
+    security_group_description = serializers.CharField(source='security_group.description', read_only=True)
+    
     class Meta:
         model = xx_BudgetTransfer
         fields = '__all__'
@@ -11,6 +15,7 @@ class BudgetTransferSerializer(serializers.ModelSerializer):
             'status': {'read_only': True},  # Set by the server, not client
             'requested_by': {'read_only': True},  # Set from the authenticated user
             'user_id': {'read_only': True},  # Set from the authenticated user
+            'security_group': {'required': False, 'allow_null': True},  # Optional security group assignment
             # Other fields that should be read-only
         }
     

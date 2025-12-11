@@ -32,6 +32,16 @@ class ApprovalWorkflowStageTemplateInlineSerializer(serializers.ModelSerializer)
         source="required_user_level.name",
         read_only=True,
     )
+    
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        # Ensure security_group can accept None/null values
+        from user_management.models import XX_SecurityGroup
+        self.fields['security_group'] = serializers.PrimaryKeyRelatedField(
+            queryset=XX_SecurityGroup.objects.filter(is_active=True),
+            required=False,
+            allow_null=True
+        )
 
     class Meta:
         model = ApprovalWorkflowStageTemplate
@@ -63,12 +73,27 @@ class ApprovalWorkflowTemplateDetailSerializer(serializers.ModelSerializer):
 
     def create(self, validated_data):
         stages_data = validated_data.pop("stages", [])
+        
+        print(f"\n=== DEBUG Workflow Create ===")
+        print(f"Validated data: {validated_data}")
+        print(f"Stages data count: {len(stages_data)}")
+        print(f"Stages data: {stages_data}")
+        print("=== END DEBUG ===\n")
+        
         template = ApprovalWorkflowTemplate.objects.create(**validated_data)
 
-        for stage_data in stages_data:
-            ApprovalWorkflowStageTemplate.objects.create(
-                workflow_template=template, **stage_data
-            )
+        for idx, stage_data in enumerate(stages_data):
+            print(f"\nCreating stage {idx + 1}: {stage_data}")
+            try:
+                stage = ApprovalWorkflowStageTemplate.objects.create(
+                    workflow_template=template, **stage_data
+                )
+                print(f"Successfully created stage: {stage.id}")
+            except Exception as e:
+                print(f"ERROR creating stage {idx + 1}: {str(e)}")
+                print(f"Stage data was: {stage_data}")
+                raise
+        
         return template
 
     def update(self, instance, validated_data):

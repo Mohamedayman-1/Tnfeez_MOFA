@@ -1,0 +1,816 @@
+{
+	"info": {
+		"_postman_id": "security-groups-api-collection",
+		"name": "Security Groups API - Phase 5",
+		"description": "Complete API collection for Security Groups with member-specific segment filtering",
+		"schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+	},
+	"item": [
+		{
+			"name": "1. Security Groups CRUD",
+			"item": [
+				{
+					"name": "Create Security Group",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"group_name\": \"Finance Team\",\n  \"description\": \"Finance department users\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/auth/security-groups/",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"auth",
+								"security-groups",
+								""
+							]
+						}
+					}
+				},
+				{
+					"name": "List All Security Groups",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/auth/security-groups/",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"auth",
+								"security-groups",
+								""
+							]
+						}
+					}
+				},
+				{
+					"name": "Get Group Details",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/auth/security-groups/{{group_id}}/",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"auth",
+								"security-groups",
+								"{{group_id}}",
+								""
+							]
+						}
+					}
+				},
+				{
+					"name": "Update Security Group",
+					"request": {
+						"method": "PUT",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"group_name\": \"Finance Department\",\n  \"description\": \"Updated description\",\n  \"is_active\": true\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/auth/security-groups/{{group_id}}/",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"auth",
+								"security-groups",
+								"{{group_id}}",
+								""
+							]
+						}
+					}
+				},
+				{
+					"name": "Delete Security Group",
+					"request": {
+						"method": "DELETE",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/auth/security-groups/{{group_id}}/",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"auth",
+								"security-groups",
+								"{{group_id}}",
+								""
+							]
+						}
+					}
+				}
+			]
+		},
+		{
+			"name": "2. Group Roles Management",
+			"item": [
+				{
+					"name": "Add Roles to Group",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"role_ids\": [2, 3, 5]\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/auth/security-groups/{{group_id}}/roles/",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"auth",
+								"security-groups",
+								"{{group_id}}",
+								"roles",
+								""
+							]
+						}
+					}
+				},
+				{
+					"name": "Remove Role from Group",
+					"request": {
+						"method": "DELETE",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/auth/security-groups/{{group_id}}/roles/{{role_id}}/",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"auth",
+								"security-groups",
+								"{{group_id}}",
+								"roles",
+								"{{role_id}}",
+								""
+							]
+						}
+					}
+				}
+			]
+		},
+		{
+			"name": "3. Group Segments Management",
+			"item": [
+				{
+					"name": "Add Segments to Group",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"segment_assignments\": [\n    {\n      \"segment_type_id\": 1,\n      \"segment_codes\": [\"E001\", \"E005\", \"E009\", \"E011\"]\n    },\n    {\n      \"segment_type_id\": 2,\n      \"segment_codes\": [\"A100\", \"A200\", \"A300\"]\n    },\n    {\n      \"segment_type_id\": 3,\n      \"segment_codes\": [\"P001\", \"P005\"]\n    }\n  ]\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/auth/security-groups/{{group_id}}/segments/",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"auth",
+								"security-groups",
+								"{{group_id}}",
+								"segments",
+								""
+							]
+						}
+					}
+				},
+				{
+					"name": "Remove Segment from Group",
+					"request": {
+						"method": "DELETE",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/auth/security-groups/{{group_id}}/segments/{{segment_id}}/",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"auth",
+								"security-groups",
+								"{{group_id}}",
+								"segments",
+								"{{segment_id}}",
+								""
+							]
+						}
+					}
+				}
+			]
+		},
+		{
+			"name": "4. Group Members Management",
+			"item": [
+				{
+					"name": "Add Member to Group",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"user_id\": 10,\n  \"role_ids\": [5, 6],\n  \"notes\": \"Finance accountant - handles all regions\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/auth/security-groups/{{group_id}}/members/",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"auth",
+								"security-groups",
+								"{{group_id}}",
+								"members",
+								""
+							]
+						}
+					}
+				},
+				{
+					"name": "Update Member Roles",
+					"request": {
+						"method": "PUT",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"role_ids\": [6],\n  \"notes\": \"Changed to Manager only\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/auth/security-groups/{{group_id}}/members/{{membership_id}}/",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"auth",
+								"security-groups",
+								"{{group_id}}",
+								"members",
+								"{{membership_id}}",
+								""
+							]
+						}
+					}
+				},
+				{
+					"name": "Remove Member from Group",
+					"request": {
+						"method": "DELETE",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/auth/security-groups/{{group_id}}/members/{{membership_id}}/",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"auth",
+								"security-groups",
+								"{{group_id}}",
+								"members",
+								"{{membership_id}}",
+								""
+							]
+						}
+					}
+				}
+			]
+		},
+		{
+			"name": "5. Member Segment Filtering (NEW)",
+			"item": [
+				{
+					"name": "Assign Segments to Member (By Type & Code)",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"segments\": {\n    \"1\": [\"E005\", \"E009\", \"E011\"],\n    \"2\": [\"A100\"],\n    \"3\": [\"P005\"]\n  }\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/auth/security-groups/{{group_id}}/members/{{membership_id}}/segments/",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"auth",
+								"security-groups",
+								"{{group_id}}",
+								"members",
+								"{{membership_id}}",
+								"segments",
+								""
+							]
+						}
+					}
+				},
+				{
+					"name": "Assign Segments to Member (Legacy - By IDs)",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"segment_assignment_ids\": [14, 15, 18]\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/auth/security-groups/{{group_id}}/members/{{membership_id}}/segments/",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"auth",
+								"security-groups",
+								"{{group_id}}",
+								"members",
+								"{{membership_id}}",
+								"segments",
+								""
+							]
+						}
+					}
+				},
+				{
+					"name": "Get Member's Accessible Segments",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/auth/security-groups/{{group_id}}/members/{{membership_id}}/segments/",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"auth",
+								"security-groups",
+								"{{group_id}}",
+								"members",
+								"{{membership_id}}",
+								"segments",
+								""
+							]
+						}
+					}
+				},
+				{
+					"name": "Remove Member Segment Restrictions",
+					"request": {
+						"method": "DELETE",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/auth/security-groups/{{group_id}}/members/{{membership_id}}/segments/",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"auth",
+								"security-groups",
+								"{{group_id}}",
+								"members",
+								"{{membership_id}}",
+								"segments",
+								""
+							]
+						}
+					}
+				}
+			]
+		},
+		{
+			"name": "6. User Access Query",
+			"item": [
+				{
+					"name": "Get User's Accessible Segments (All Groups)",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/auth/users/{{user_id}}/accessible-segments/",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"auth",
+								"users",
+								"{{user_id}}",
+								"accessible-segments",
+								""
+							]
+						}
+					}
+				}
+			]
+		},
+		{
+			"name": "7. Complete Workflow Example",
+			"item": [
+				{
+					"name": "Step 1 - Create Group",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"group_name\": \"Finance Team\",\n  \"description\": \"Finance department with 10 segments\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/auth/security-groups/",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"auth",
+								"security-groups",
+								""
+							]
+						}
+					}
+				},
+				{
+					"name": "Step 2 - Add Roles",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"role_ids\": [2, 3]\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/auth/security-groups/1/roles/",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"auth",
+								"security-groups",
+								"1",
+								"roles",
+								""
+							]
+						}
+					}
+				},
+				{
+					"name": "Step 3 - Add 10 Segments",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"segment_assignments\": [\n    {\n      \"segment_type_id\": 1,\n      \"segment_codes\": [\"E001\", \"E002\", \"E003\", \"E004\", \"E005\", \"E006\", \"E007\", \"E008\", \"E009\", \"E010\"]\n    }\n  ]\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/auth/security-groups/1/segments/",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"auth",
+								"security-groups",
+								"1",
+								"segments",
+								""
+							]
+						}
+					}
+				},
+				{
+					"name": "Step 4 - Add Manager (Full Access)",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"user_id\": 5,\n  \"role_ids\": [6],\n  \"notes\": \"Manager - sees all 10 segments\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/auth/security-groups/1/members/",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"auth",
+								"security-groups",
+								"1",
+								"members",
+								""
+							]
+						}
+					}
+				},
+				{
+					"name": "Step 5 - Add Member #2",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"user_id\": 10,\n  \"role_ids\": [5],\n  \"notes\": \"Accountant - will be restricted to segments 5 and 6\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/auth/security-groups/1/members/",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"auth",
+								"security-groups",
+								"1",
+								"members",
+								""
+							]
+						}
+					}
+				},
+				{
+					"name": "Step 6 - Restrict Member #2 to Segments 5 & 6",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"segments\": {\n    \"1\": [\"E005\", \"E006\"]\n  }\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/auth/security-groups/1/members/2/segments/",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"auth",
+								"security-groups",
+								"1",
+								"members",
+								"2",
+								"segments",
+								""
+							]
+						}
+					}
+				},
+				{
+					"name": "Step 7 - Verify Manager Access (All 10)",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/auth/security-groups/1/members/1/segments/",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"auth",
+								"security-groups",
+								"1",
+								"members",
+								"1",
+								"segments",
+								""
+							]
+						}
+					}
+				},
+				{
+					"name": "Step 8 - Verify Member #2 Access (Only 5 & 6)",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/auth/security-groups/1/members/2/segments/",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"auth",
+								"security-groups",
+								"1",
+								"members",
+								"2",
+								"segments",
+								""
+							]
+						}
+					}
+				}
+			]
+		},
+		{
+			"name": "8. Helper Endpoints",
+			"item": [
+				{
+					"name": "Get Segment Types",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/account-entitys/segments/types/",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"account-entitys",
+								"segments",
+								"types",
+								""
+							]
+						}
+					}
+				},
+				{
+					"name": "Get User Roles (xx_UserLevel)",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/auth/user-levels/",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"auth",
+								"user-levels",
+								""
+							]
+						}
+					}
+				}
+			]
+		}
+	],
+	"auth": {
+		"type": "bearer",
+		"bearer": [
+			{
+				"key": "token",
+				"value": "{{token}}",
+				"type": "string"
+			}
+		]
+	},
+	"event": [
+		{
+			"listen": "prerequest",
+			"script": {
+				"type": "text/javascript",
+				"exec": [
+					""
+				]
+			}
+		},
+		{
+			"listen": "test",
+			"script": {
+				"type": "text/javascript",
+				"exec": [
+					""
+				]
+			}
+		}
+	],
+	"variable": [
+		{
+			"key": "base_url",
+			"value": "http://localhost:8000",
+			"type": "string"
+		},
+		{
+			"key": "token",
+			"value": "YOUR_AUTH_TOKEN_HERE",
+			"type": "string"
+		},
+		{
+			"key": "group_id",
+			"value": "1",
+			"type": "string"
+		},
+		{
+			"key": "membership_id",
+			"value": "2",
+			"type": "string"
+		},
+		{
+			"key": "user_id",
+			"value": "10",
+			"type": "string"
+		},
+		{
+			"key": "role_id",
+			"value": "5",
+			"type": "string"
+		},
+		{
+			"key": "segment_id",
+			"value": "10",
+			"type": "string"
+		}
+	]
+}
