@@ -80,8 +80,13 @@ class ApprovalWorkflowStageTemplate(models.Model):
 		blank=True,
 		help_text="If set, assignments will include users with this level",
 	)
-	required_role = models.CharField(
-		max_length=50, null=True, blank=True, help_text="Optional user.role filter"
+	required_role = models.ForeignKey(
+		"user_management.XX_SecurityGroupRole",
+		on_delete=models.SET_NULL,
+		null=True,
+		blank=True,
+		related_name="stage_templates",
+		help_text="Required role within the security group (e.g., Finance Manager, Unit Head). Users must have this role assigned in their security group membership to approve at this stage."
 	)
 	security_group = models.ForeignKey(
 		"user_management.XX_SecurityGroup",
@@ -89,7 +94,7 @@ class ApprovalWorkflowStageTemplate(models.Model):
 		null=True,
 		blank=True,
 		related_name="approval_stage_templates",
-		help_text="If set, only members of this security group can approve at this stage"
+		help_text="DEPRECATED: Security group is now determined by XX_WorkflowTemplateAssignment. This field is kept for backward compatibility but should not be used in new workflows."
 	)
 	dynamic_filter_json = models.TextField(
 		null=True,
@@ -116,7 +121,13 @@ class ApprovalWorkflowStageTemplate(models.Model):
 		return f"StageTemplate {self.workflow_template.code}#{self.order_index} {self.name}"
 
 class ApprovalWorkflowInstance(models.Model):
-	"""Runtime instance of a workflow for a specific budget transfer."""
+	"""
+	Runtime instance of a workflow for a specific budget transfer.
+	
+	NOTE: Changed from OneToOneField to ForeignKey to support multiple sequential workflows.
+	A transfer can now have multiple workflow instances executing in sequence based on
+	XX_WorkflowTemplateAssignment.execution_order.
+	"""
 
 	STATUS_PENDING = "pending"
 	STATUS_IN_PROGRESS = "in_progress"
@@ -131,14 +142,27 @@ class ApprovalWorkflowInstance(models.Model):
 		(STATUS_CANCELLED, "Cancelled"),
 	]
 
-	budget_transfer = models.OneToOneField(
+	budget_transfer = models.ForeignKey(
 		"budget_management.xx_BudgetTransfer",
 		on_delete=models.CASCADE,
-		related_name="workflow_instance",
+		related_name="workflow_instances",
 		db_column="transaction_id",
+		help_text="The transfer this workflow belongs to"
 	)
 	template = models.ForeignKey(
 		ApprovalWorkflowTemplate, on_delete=models.PROTECT, related_name="instances"
+	)
+	workflow_assignment = models.ForeignKey(
+		"XX_WorkflowTemplateAssignment",
+		on_delete=models.SET_NULL,
+		null=True,
+		blank=True,
+		related_name="workflow_instances",
+		help_text="The assignment that created this workflow instance (tracks execution order)"
+	)
+	execution_order = models.PositiveIntegerField(
+		default=1,
+		help_text="Order of execution for this workflow (1 = first, 2 = second, etc.)"
 	)
 	current_stage_template = models.ForeignKey(
 		ApprovalWorkflowStageTemplate,
@@ -154,12 +178,37 @@ class ApprovalWorkflowInstance(models.Model):
 
 	class Meta:
 		db_table = "APPROVAL_WORKFLOW_INSTANCE"
+		ordering = ["budget_transfer", "execution_order"]
 		indexes = [
+			models.Index(fields=["budget_transfer", "execution_order", "status"]),
 			models.Index(fields=["status", "current_stage_template"]),
 		]
 
 	def __str__(self):
-		return f"WorkflowInstance for Transfer {self.budget_transfer_id} ({self.status})"
+		return f"WorkflowInstance for Transfer {self.budget_transfer_id} (Order: {self.execution_order}, Status: {self.status})"
+	
+	@classmethod
+	def get_active_workflow(cls, budget_transfer):
+		"""
+		Get the currently active workflow instance for a transfer.
+		Returns the first pending/in-progress workflow ordered by execution_order.
+		"""
+		return cls.objects.filter(
+			budget_transfer=budget_transfer,
+			status__in=[cls.STATUS_PENDING, cls.STATUS_IN_PROGRESS]
+		).order_by("execution_order").first()
+	
+	@classmethod
+	def get_next_workflow(cls, budget_transfer, current_workflow):
+		"""
+		Get the next workflow to activate after current_workflow completes.
+		Returns None if this is the last workflow.
+		"""
+		return cls.objects.filter(
+			budget_transfer=budget_transfer,
+			execution_order__gt=current_workflow.execution_order,
+			status=cls.STATUS_PENDING
+		).order_by("execution_order").first()
 
 class ApprovalWorkflowStageInstance(models.Model):
 	"""Concrete runtime stage tied to its template and parent instance."""
@@ -314,3 +363,58 @@ class ApprovalDelegation(models.Model):
 			self.active = False
 			self.deactivated_at = timezone.now()
 			self.save(update_fields=["active", "deactivated_at"])
+
+
+class XX_WorkflowTemplateAssignment(models.Model):
+	"""
+	Links workflow templates to security groups with execution order.
+	
+	When a user creates a transfer, all workflow templates assigned to their
+	security group are executed sequentially based on execution_order.
+	
+	Example:
+		Finance Team → Workflow Template 1 (order=1) → Workflow Template 2 (order=2)
+		When Finance Team creates transfer:
+		1. Workflow 1 starts and runs to completion
+		2. When Workflow 1 completes → Workflow 2 automatically starts
+	"""
+	security_group = models.ForeignKey(
+		"user_management.XX_SecurityGroup",
+		on_delete=models.CASCADE,
+		related_name="workflow_assignments",
+		help_text="Security group that will use these workflows"
+	)
+	workflow_template = models.ForeignKey(
+		ApprovalWorkflowTemplate,
+		on_delete=models.CASCADE,
+		related_name="security_group_assignments",
+		help_text="Workflow template to execute"
+	)
+	execution_order = models.PositiveIntegerField(
+		default=1,
+		help_text="Order of execution (1 = first workflow, 2 = second, etc.)"
+	)
+	is_active = models.BooleanField(
+		default=True,
+		help_text="Whether this assignment is active"
+	)
+	created_at = models.DateTimeField(auto_now_add=True)
+	created_by = models.ForeignKey(
+		"user_management.xx_User",
+		on_delete=models.SET_NULL,
+		null=True,
+		blank=True,
+		related_name="created_workflow_assignments",
+		help_text="User who created this assignment"
+	)
+	
+	class Meta:
+		db_table = "XX_WORKFLOW_TEMPLATE_ASSIGNMENT"
+		ordering = ["security_group", "execution_order"]
+		unique_together = ("security_group", "workflow_template")
+		indexes = [
+			models.Index(fields=["security_group", "is_active", "execution_order"]),
+		]
+	
+	def __str__(self):
+		return f"{self.security_group.group_name} → {self.workflow_template.code} (Order: {self.execution_order})"

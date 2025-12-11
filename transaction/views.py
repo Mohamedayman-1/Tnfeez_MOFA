@@ -892,13 +892,12 @@ class TransactionTransferListView(APIView):
                         "MOFA_COST_2 budget record not found for the provided segments"
                     )
                 else:
-                  half_available = mofa_available / 2
-
-                if from_center > half_available:
-                    validation_errors.append(
-                        f"اجمالى السيولة المنقولة [{from_center:,.2f}] من البند لا يجب ان تتخطى 50% "
-                        f"من اجمالى موازنة التكاليف المعتمدة للبند المنقول منه [{half_available:,.2f}]"
-                    )
+                    half_available = mofa_available / 2
+                    if from_center > half_available:
+                        validation_errors.append(
+                            f"اجمالى السيولة المنقولة [{from_center:,.2f}] من البند لا يجب ان تتخطى 50% "
+                            f"من اجمالى موازنة التكاليف المعتمدة للبند المنقول منه [{half_available:,.2f}]"
+                        )
             elif is_distination > 0:
                 fund_ava,tot_budget = self._get_total_budget(segments_for_validation)
                 if tot_budget is None and fund_ava is None:
@@ -1181,7 +1180,7 @@ class TransactionTransferListView(APIView):
                     "status": status,
                     "access_control": {
                         "access_source": access_source,
-                        "security_group_id": transaction_object.security_group.group_id if transaction_object.security_group else None,
+                        "security_group_id": transaction_object.security_group.id if transaction_object.security_group else None,
                         "security_group_name": transaction_object.security_group.group_name if transaction_object.security_group else None,
                         "is_restricted": transaction_object.security_group is not None
                     }

@@ -62,68 +62,99 @@ class ApprovalManager:
     @staticmethod
     def create_instance(
         budget_transfer: xx_BudgetTransfer, transfer_type: str = None
-    ) -> ApprovalWorkflowInstance:
+    ) -> list:
         """
-        Create a workflow instance selecting most recent active template for transfer_type,
-        fallback to 'GEN'. Validate quorum counts on stage templates.
+        Create workflow instances based on the transfer's security group assignments.
+        
+        NEW BEHAVIOR (Phase 6):
+        - Gets ALL workflow templates assigned to the transfer's security group
+        - Creates one workflow instance per assignment, ordered by execution_order
+        - Returns list of created instances (first one will be activated)
+        
+        Args:
+            budget_transfer: The transfer to create workflows for
+            transfer_type: Optional override for transfer type
+        
+        Returns:
+            List of ApprovalWorkflowInstance objects (empty if no assignments found)
         """
+        from .models import XX_WorkflowTemplateAssignment
+        
         if not transfer_type:
             transfer_type = getattr(budget_transfer, "transfer_type", "GEN") or "GEN"
-
-        template = (
-            ApprovalWorkflowTemplate.objects.filter(
-                transfer_type=transfer_type, is_active=True
+        
+        # Check if transfer has security group
+        if not budget_transfer.security_group_id:
+            print(f"[WARNING] Transfer {budget_transfer.code} has no security group - no workflows created")
+            return []
+        
+        # Get all workflow template assignments for this security group
+        assignments = XX_WorkflowTemplateAssignment.objects.filter(
+            security_group=budget_transfer.security_group,
+            is_active=True
+        ).select_related('workflow_template').order_by('execution_order')
+        
+        if not assignments.exists():
+            print(f"[WARNING] No workflow templates assigned to security group {budget_transfer.security_group.group_name}")
+            return []
+        
+        created_instances = []
+        for assignment in assignments:
+            template = assignment.workflow_template
+            
+            # Validate quorum config sanity
+            for st in template.stages.all():
+                if (
+                    st.decision_policy == ApprovalWorkflowStageTemplate.POLICY_QUORUM
+                    and st.quorum_count
+                ):
+                    if st.quorum_count < 1:
+                        raise ValueError(
+                            f"Invalid quorum_count {st.quorum_count} on stage {st}"
+                        )
+            
+            # Create workflow instance with execution order from assignment
+            instance = ApprovalWorkflowInstance.objects.create(
+                budget_transfer=budget_transfer,
+                template=template,
+                workflow_assignment=assignment,
+                execution_order=assignment.execution_order,
+                status=ApprovalWorkflowInstance.STATUS_PENDING,
             )
-            .order_by("-version")
-            .first()
-        )
-
-        if not template:
-            template = (
-                ApprovalWorkflowTemplate.objects.filter(
-                    transfer_type="GEN", is_active=True
-                )
-                .order_by("-version")
-                .first()
-            )
-
-        if not template:
-            raise ValueError(
-                f"No active workflow template found for type {transfer_type}"
-            )
-
-        # Validate quorum config sanity
-        for st in template.stages.all():
-            if (
-                st.decision_policy == ApprovalWorkflowStageTemplate.POLICY_QUORUM
-                and st.quorum_count
-            ):
-                # ensure at least 1 (we don't yet know assignment count), just ensure quorum_count >= 1
-                if st.quorum_count < 1:
-                    raise ValueError(
-                        f"Invalid quorum_count {st.quorum_count} on stage {st}"
-                    )
-
-        instance = ApprovalWorkflowInstance.objects.create(
-            budget_transfer=budget_transfer,
-            template=template,
-            status=ApprovalWorkflowInstance.STATUS_PENDING,
-        )
-        return instance
+            created_instances.append(instance)
+            print(f"[INFO] Created workflow instance: {template.code} (Order: {assignment.execution_order})")
+        
+        return created_instances
 
     @classmethod
     def start_workflow(
         cls, budget_transfer: xx_BudgetTransfer, transfer_type: str = None
     ) -> ApprovalWorkflowInstance:
-        instance = getattr(budget_transfer, "workflow_instance", None)
-        if not instance:
-            instance = cls.create_instance(budget_transfer, transfer_type)
-
+        """
+        Start workflow(s) for a transfer.
+        
+        NEW BEHAVIOR (Phase 6):
+        - Creates ALL workflow instances if they don't exist
+        - Activates ONLY the first workflow (execution_order=1)
+        - Returns the first workflow instance
+        """
+        # Get or create workflow instances
+        active_workflow = budget_transfer.workflow_instance  # Uses property to get active workflow
+        
+        if not active_workflow:
+            # Create all workflow instances
+            instances = cls.create_instance(budget_transfer, transfer_type)
+            if not instances:
+                raise ValueError(f"No workflow templates assigned to security group for transfer {budget_transfer.code}")
+            
+            # Get the first workflow (lowest execution_order)
+            active_workflow = instances[0]
+        
         # if pending -> activate first stage(s)
-        if instance.status == ApprovalWorkflowInstance.STATUS_PENDING:
-            cls._activate_next_stage_internal(budget_transfer, instance=instance)
+        if active_workflow.status == ApprovalWorkflowInstance.STATUS_PENDING:
+            cls._activate_next_stage_internal(budget_transfer, instance=active_workflow)
 
-        return instance
+        return active_workflow
 
     @classmethod
     def restart_workflow(
@@ -195,41 +226,82 @@ class ApprovalManager:
     def _create_assignments(cls, stage_instance: ApprovalWorkflowStageInstance):
         """
         Create assignments based on stage template filters.
+        
+        NEW BEHAVIOR (Phase 6):
+        - Gets security group from the transfer's workflow assignment (not from stage template)
+        - Filters users by required_role (XX_SecurityGroupRole) within that security group
+        - Stage template's security_group field is now ignored
+        
         If no users found -> return empty list (caller should auto-skip).
         """
-        from user_management.models import XX_UserGroupMembership
+        from user_management.models import XX_UserGroupMembership, XX_SecurityGroupRole
         
         st = stage_instance.stage_template
-        qs = xx_User.objects.filter(is_active=True)  # only active users
+        workflow_instance = stage_instance.workflow_instance
+        budget_transfer = workflow_instance.budget_transfer
         
-        # Filter by security group if specified
-        if st.security_group:
-            # Get active members of the security group
-            member_user_ids = XX_UserGroupMembership.objects.filter(
-                security_group=st.security_group,
-                is_active=True
-            ).values_list('user_id', flat=True)
-            qs = qs.filter(id__in=member_user_ids)
+        # Get security group from the transfer (all workflows use the same group now)
+        if not budget_transfer.security_group_id:
+            print(f"[WARNING] Transfer {budget_transfer.code} has no security group - no assignments created")
+            return []
         
-        # Apply additional filters
-        if st.required_user_level:
-            qs = qs.filter(user_level=st.required_user_level)
+        security_group = budget_transfer.security_group
+        
+        # Get active members of the security group
+        member_user_ids = XX_UserGroupMembership.objects.filter(
+            security_group=security_group,
+            is_active=True
+        ).values_list('user_id', flat=True)
+        
+        qs = xx_User.objects.filter(
+            id__in=member_user_ids,
+            is_active=True
+        )
+        
+        print(f"\n=== DEBUG _create_assignments ===")
+        print(f"Stage: {st.name} (ID: {st.id})")
+        print(f"Security Group: {security_group.group_name}")
+        print(f"Required Role: {st.required_role}")
+        print(f"Total active members in group: {qs.count()}")
+        
+        # Filter by required role if specified
+        # required_role is FK to XX_SecurityGroupRole (group-specific role assignment)
         if st.required_role:
-            qs = qs.filter(role=st.required_role)
-
+            # Get users who have this role assigned in their security group membership
+            users_with_role_ids = list(XX_UserGroupMembership.objects.filter(
+                security_group=security_group,
+                is_active=True,
+                assigned_roles__in=[st.required_role]
+            ).values_list('user_id', flat=True))
+            
+            print(f"Users with required role {st.required_role}: {users_with_role_ids}")
+            
+            qs = qs.filter(id__in=users_with_role_ids)
+            print(f"Filtered queryset count: {qs.count()}")
+        else:
+            print(f"[WARNING] No required_role set for stage {st.name} - ALL group members will be assigned!")
+        
         created = []
         for user in qs.distinct():
+            print(f"Creating assignment for user: {user.username} (ID: {user.id})")
             obj, created_flag = ApprovalAssignment.objects.get_or_create(
                 stage_instance=stage_instance,
                 user=user,
                 defaults={
                     "role_snapshot": getattr(user, "role", None),
-                    "level_snapshot": getattr(user.user_level, "name", None),
+                    "level_snapshot": getattr(user.user_level, "name", None) if user.user_level else None,
                     "is_mandatory": True,
                 },
             )
             if created_flag:
                 created.append(obj)
+        
+        print(f"Created {len(created)} new assignments")
+        print("=== END DEBUG ===\n")
+        
+        if not created:
+            print(f"[WARNING] No users found for stage {st.name} with role {st.required_role} in group {security_group.group_name}")
+        
         return created
 
     @classmethod
@@ -291,6 +363,32 @@ class ApprovalManager:
                                 "current_stage_template",
                             ]
                         )
+                        
+                        # NEW: Check if there's a next workflow to start (Phase 6)
+                        next_workflow = ApprovalWorkflowInstance.get_next_workflow(budget_transfer, instance)
+                        if next_workflow:
+                            print(f"[INFO] Workflow {instance.template.code} completed. Starting next workflow: {next_workflow.template.code}")
+                            cls._activate_next_stage_internal(budget_transfer, instance=next_workflow)
+                        else:
+                            print(f"[INFO] All workflows completed for transfer {budget_transfer.code}")
+                            
+                            # Update budget transfer status to 'approved'
+                            budget_transfer.status = 'approved'
+                            budget_transfer.save(update_fields=['status'])
+                            print(f"[INFO] Budget transfer {budget_transfer.code} status updated to 'approved'")
+                            
+                            # Trigger Oracle upload for approved workflows
+                            from budget_management.tasks import upload_budget_to_oracle, upload_journal_to_oracle
+                            
+                            if budget_transfer.code and budget_transfer.code[0:3] != "HFR":
+                                print(f"[INFO] Queuing budget upload task for transaction {budget_transfer.transaction_id}")
+                                upload_budget_to_oracle.delay(
+                                    transaction_id=budget_transfer.transaction_id,
+                                    entry_type="Approve"
+                                )
+                            else:
+                                print(f"[INFO] Skipping Oracle upload for HFR transaction {budget_transfer.code}")
+                        
                         return instance
                     next_order = next_template.order_index
                 else:
@@ -322,6 +420,32 @@ class ApprovalManager:
                             "current_stage_template",
                         ]
                     )
+                    
+                    # NEW: Check if there's a next workflow to start (Phase 6)
+                    next_workflow = ApprovalWorkflowInstance.get_next_workflow(budget_transfer, instance)
+                    if next_workflow:
+                        print(f"[INFO] Workflow {instance.template.code} completed. Starting next workflow: {next_workflow.template.code}")
+                        cls._activate_next_stage_internal(budget_transfer, instance=next_workflow)
+                    else:
+                        print(f"[INFO] All workflows completed for transfer {budget_transfer.code}")
+                        
+                        # Update budget transfer status to 'approved'
+                        budget_transfer.status = 'approved'
+                        budget_transfer.save(update_fields=['status'])
+                        print(f"[INFO] Budget transfer {budget_transfer.code} status updated to 'approved'")
+                        
+                        # Trigger Oracle upload for approved workflows
+                        from budget_management.tasks import upload_budget_to_oracle, upload_journal_to_oracle
+                        
+                        if budget_transfer.code and budget_transfer.code[0:3] != "HFR":
+                            print(f"[INFO] Queuing budget upload task for transaction {budget_transfer.transaction_id}")
+                            upload_budget_to_oracle.delay(
+                                transaction_id=budget_transfer.transaction_id,
+                                entry_type="Approve"
+                            )
+                        else:
+                            print(f"[INFO] Skipping Oracle upload for HFR transaction {budget_transfer.code}")
+                    
                     return instance
                 next_order = next_q.order_index
 
@@ -728,16 +852,20 @@ class ApprovalManager:
         """
         Return list of BudgetTransfer objects for which this user
         has pending approval assignments in active workflow stages.
+        
+        NEW BEHAVIOR (Phase 6):
+        - Uses workflow_instances (ForeignKey) instead of workflow_instance (OneToOneField)
+        - Filters by user's role matching the stage's required_role
         """
         base_qs = xx_BudgetTransfer.objects.filter(
-            workflow_instance__status=ApprovalWorkflowInstance.STATUS_IN_PROGRESS
+            workflow_instances__status=ApprovalWorkflowInstance.STATUS_IN_PROGRESS
         ).distinct()
         print(f"Total transfers in queryset: {base_qs.count()}")
 
         # Pre-user filter: active stages with any pending assignments
         transfers = base_qs.filter(
-            workflow_instance__stage_instances__status=ApprovalWorkflowStageInstance.STATUS_ACTIVE,
-            workflow_instance__stage_instances__assignments__status=ApprovalAssignment.STATUS_PENDING,
+            workflow_instances__stage_instances__status=ApprovalWorkflowStageInstance.STATUS_ACTIVE,
+            workflow_instances__stage_instances__assignments__status=ApprovalAssignment.STATUS_PENDING,
         ).distinct()
         print(f"Transfers with active stages: {transfers.count()}")
         print(f"Transfers with pending assignments: {transfers.count()}")
@@ -779,10 +907,11 @@ class ApprovalManager:
         # IMPORTANT: Anchor user+pending to the SAME active stage instance.
         # Using the assignment's stage_instance relation avoids mixing conditions
         # across different stages in the same workflow.
+        # NEW: Uses workflow_instances (ForeignKey) instead of workflow_instance
         transfers = base_qs.filter(
-            workflow_instance__stage_instances__assignments__user=user,
-            workflow_instance__stage_instances__assignments__status=ApprovalAssignment.STATUS_PENDING,
-            workflow_instance__stage_instances__assignments__stage_instance__status=ApprovalWorkflowStageInstance.STATUS_ACTIVE,
+            workflow_instances__stage_instances__assignments__user=user,
+            workflow_instances__stage_instances__assignments__status=ApprovalAssignment.STATUS_PENDING,
+            workflow_instances__stage_instances__assignments__stage_instance__status=ApprovalWorkflowStageInstance.STATUS_ACTIVE,
         ).distinct()
         print(
             f"Transfers with active pending assignment for user {user}: {transfers.count()}"
@@ -808,7 +937,7 @@ class ApprovalManager:
             ).select_related(
                 "stage_instance__workflow_instance",
                 "stage_instance__stage_template",
-            )
+            )[:100]  # Limit for debug output
             print(
                 f"Debug: Active PENDING assignments for user {user} that drive the final result: {user_asgs.count()}"
             )

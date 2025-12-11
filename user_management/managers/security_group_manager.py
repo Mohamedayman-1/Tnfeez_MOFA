@@ -59,14 +59,25 @@ class SecurityGroupManager:
             try:
                 role = xx_UserLevel.objects.get(pk=role_id)
                 
-                # Check if already exists
-                if XX_SecurityGroupRole.objects.filter(
+                # Check if already exists (active or inactive)
+                existing_role = XX_SecurityGroupRole.objects.filter(
                     security_group=security_group,
                     role=role
-                ).exists():
-                    errors.append(f"Role '{role.name}' already exists in group")
-                    continue
+                ).first()
                 
+                if existing_role:
+                    if existing_role.is_active:
+                        errors.append(f"Role '{role.name}' is already active in group")
+                        continue
+                    else:
+                        # Reactivate inactive role
+                        existing_role.is_active = True
+                        existing_role.added_by = added_by
+                        existing_role.save()
+                        added_count += 1
+                        continue
+                
+                # Create new role
                 XX_SecurityGroupRole.objects.create(
                     security_group=security_group,
                     role=role,

@@ -166,12 +166,12 @@ class SegmentTransferAggregationView(APIView):
         if transaction_status == "approved":
             from approvals.models import ApprovalWorkflowInstance
             transaction_segments = transaction_segments.filter(
-                transaction_transfer__transaction__workflow_instance__status=ApprovalWorkflowInstance.STATUS_APPROVED
+                transaction_transfer__transaction__workflow_instances__status=ApprovalWorkflowInstance.STATUS_APPROVED
             )
         elif transaction_status == "pending":
             from approvals.models import ApprovalWorkflowInstance
             transaction_segments = transaction_segments.filter(
-                transaction_transfer__transaction__workflow_instance__status=ApprovalWorkflowInstance.STATUS_IN_PROGRESS
+                transaction_transfer__transaction__workflow_instances__status=ApprovalWorkflowInstance.STATUS_IN_PROGRESS
             )
         
         # Step 1: Get aggregated financial data from XX_Segment_Funds grouped by the segment column

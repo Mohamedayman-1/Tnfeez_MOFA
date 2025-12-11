@@ -34,8 +34,11 @@ from .phase4_views import (
 from .views_security_groups import (
     SecurityGroupListCreateView,
     SecurityGroupDetailView,
+    SecurityGroupDeletePermanentView,
     SystemRolesView,
     SecurityGroupRolesView,
+    SecurityGroupRoleActivateView,
+    SecurityGroupRoleDeletePermanentView,
     SecurityGroupSegmentsView,
     SecurityGroupMembersView,
     MemberSegmentAssignmentView,
@@ -45,6 +48,7 @@ from .views_security_groups import (
     MemberAbilitiesView,
     SecurityGroupAvailableUsersView,
     SecurityGroupAvailableSegmentsView,
+    AllSecurityGroupRolesView,
 )
 
 app_name = 'user_management'
@@ -115,13 +119,19 @@ urlpatterns = [
     # Security Groups CRUD
     path('security-groups/', SecurityGroupListCreateView.as_view(), name='security-group-list'),
     path('security-groups/<int:group_id>/', SecurityGroupDetailView.as_view(), name='security-group-detail'),
+    path('security-groups/<int:group_id>/delete-permanent/', SecurityGroupDeletePermanentView.as_view(), name='security-group-delete-permanent'),
     
     # System Roles (for adding roles to security groups)
     path('roles/', SystemRolesView.as_view(), name='system-roles'),
     
+    # All Security Group Roles (for workflow configuration)
+    path('security-group-roles/all/', AllSecurityGroupRolesView.as_view(), name='all-security-group-roles'),
+    
     # Group Roles Management
     path('security-groups/<int:group_id>/roles/', SecurityGroupRolesView.as_view(), name='security-group-roles'),
     path('security-groups/<int:group_id>/roles/<int:role_id>/', SecurityGroupRolesView.as_view(), name='security-group-role-delete'),
+    path('security-groups/<int:group_id>/roles/<int:role_id>/activate/', SecurityGroupRoleActivateView.as_view(), name='security-group-role-activate'),
+    path('security-groups/<int:group_id>/roles/<int:role_id>/delete-permanent/', SecurityGroupRoleDeletePermanentView.as_view(), name='security-group-role-delete-permanent'),
     
     # Role Abilities Management
     path('security-groups/<int:group_id>/roles/<int:role_id>/abilities/', RoleAbilitiesView.as_view(), name='role-abilities'),

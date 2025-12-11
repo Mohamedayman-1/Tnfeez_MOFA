@@ -319,8 +319,10 @@ class ListBudgetTransferView(APIView):
                 # User has no security group - return empty queryset
                 return Response(
                     {
-                        "error": "Access denied",
-                        "message": "You are not a member of any security group. Please contact an administrator.",
+                        "success": False,
+                        "error": "ACCESS_DENIED",
+                        "message": "You are not a member of any security group. Please contact your administrator to be assigned to a security group.",
+                        "details": "Your account is not assigned to any security group. Contact an administrator for access.",
                         "results": [],
                         "count": 0,
                         "next": None,
@@ -449,9 +451,16 @@ class ListBudgetTransferView(APIView):
 
         # Ensure we return the workflow instance status (if any) in the `status` column.
         # If no workflow instance exists, fall back to the transfer's own status.
+        # Phase 6: Get active workflow (lowest execution_order with active status)
         # Annotate under a different name to avoid conflict with the model's `status` field
+        from django.db.models import Subquery, OuterRef
+        active_workflow_status = ApprovalWorkflowInstance.objects.filter(
+            budget_transfer_id=OuterRef('transaction_id'),
+            status__in=['pending', 'in_progress']
+        ).order_by('execution_order').values('status')[:1]
+        
         transfers = transfers.annotate(
-            workflow_status=Coalesce(F("workflow_instance__status"), F("status"))
+            workflow_status=Coalesce(Subquery(active_workflow_status), F("status"))
         )
 
         # Convert to list to avoid lazy evaluation issues with Oracle
@@ -487,10 +496,11 @@ class ListBudgetTransferView(APIView):
             # ========== Get Approval Actions (Reasons/Comments) ==========
             approval_actions = []
             try:
-                # Get workflow instance for this transaction
+                # Get active workflow instance for this transaction (Phase 6: get lowest execution_order active workflow)
                 workflow_instance = ApprovalWorkflowInstance.objects.filter(
-                    budget_transfer_id=transaction_id
-                ).first()
+                    budget_transfer_id=transaction_id,
+                    status__in=['pending', 'in_progress', 'approved', 'rejected']
+                ).order_by('execution_order').first()
                 
                 if workflow_instance:
                     # Get all stage instances for this workflow
@@ -699,75 +709,36 @@ class ListBudgetTransfer_approvels_View(APIView):
                             membership.assigned_roles.values_list('role_id', flat=True)
                         )
                 
-                # Build list of transfer IDs where user's stage assignment matches their role
+                # Build list of transfer IDs where user has pending assignments
+                # Note: We don't filter by transfer.security_group_id here because multi-stage
+                # workflows may have stages requiring different security groups than the transfer's
+                # origin group. The workflow system handles proper assignment validation.
                 valid_transfer_ids = []
-                print(f"\n=== DEBUG: Role-based filtering for user {user.username} ===")
-                print(f"User's roles by group: {user_roles_by_group}")
+                print(f"\n=== DEBUG: Assignment filtering for user {user.username} ===")
                 
                 for transfer in pending_transfers:
                     workflow_instance = getattr(transfer, 'workflow_instance', None)
                     if not workflow_instance:
                         continue
                     
-                    transfer_group_id = transfer.security_group_id
                     print(f"\n--- Transfer {transfer.code} (ID: {transfer.transaction_id}) ---")
-                    print(f"Transfer security_group_id: {transfer_group_id}")
-                    
-                    # Check if transfer belongs to user's security groups
-                    if transfer_group_id not in user_approval_groups and transfer_group_id is not None:
-                        print(f"❌ Transfer group {transfer_group_id} not in user's approval groups {user_approval_groups}")
-                        continue
                     
                     # Get user's active pending assignments for this transfer
                     user_assignments = ApprovalAssignment.objects.filter(
                         user=request.user,
                         status=ApprovalAssignment.STATUS_PENDING,
-                        stage_instance__workflow_instance=workflow_instance,
+                        stage_instance__workflow_instance__id=workflow_instance.id,
                         stage_instance__status=ApprovalWorkflowStageInstance.STATUS_ACTIVE
-                    ).select_related('stage_instance__stage_template', 'stage_instance__stage_template__required_user_level')
+                    ).select_related('stage_instance__stage_template')
                     
                     print(f"User has {user_assignments.count()} pending assignments for this transfer")
                     
-                    # Check if any assignment matches user's role in the security group
-                    for assignment in user_assignments:
-                        stage_template = assignment.stage_instance.stage_template
-                        required_level_id = stage_template.required_user_level_id
-                        required_level_name = stage_template.required_user_level.name if stage_template.required_user_level else None
-                        
-                        print(f"  Stage: {stage_template.name}")
-                        print(f"  Required level ID: {required_level_id} (Name: {required_level_name})")
-                        
-                        # If no required level, allow (open to all)
-                        if not required_level_id:
-                            print(f"  ✅ No required level - ALLOWED")
-                            valid_transfer_ids.append(transfer.transaction_id)
-                            break
-                        
-                        # If transfer has security group, check user's roles in that group
-                        if transfer_group_id and transfer_group_id in user_roles_by_group:
-                            user_role_ids = user_roles_by_group[transfer_group_id]
-                            print(f"  User's role IDs in group {transfer_group_id}: {user_role_ids}")
-                            if required_level_id in user_role_ids:
-                                print(f"  ✅ Role match found - ALLOWED")
-                                valid_transfer_ids.append(transfer.transaction_id)
-                                break
-                            else:
-                                print(f"  ❌ Required level {required_level_id} NOT in user's roles {user_role_ids}")
-                        # If no security group on transfer, check user's roles in any group
-                        elif not transfer_group_id:
-                            print(f"  Transfer has no security group - checking all user groups")
-                            for group_id, group_roles in user_roles_by_group.items():
-                                print(f"    Group {group_id} roles: {group_roles}")
-                                if required_level_id in group_roles:
-                                    print(f"  ✅ Role match found in group {group_id} - ALLOWED")
-                                    valid_transfer_ids.append(transfer.transaction_id)
-                                    break
-                            else:
-                                print(f"  ❌ Required level {required_level_id} NOT in any user group")
-                                continue
-                            break
+                    # If user has any pending assignments for this transfer, they can see it
+                    if user_assignments.exists():
+                        print(f"  ✅ User has pending assignment - ALLOWED")
+                        valid_transfer_ids.append(transfer.transaction_id)
                 
-                print(f"\n=== Valid transfer IDs after role filtering: {valid_transfer_ids} ===\n")
+                print(f"\n=== Valid transfer IDs after assignment check: {valid_transfer_ids} ===\n")
                 
                 # Filter to only valid transfers
                 pending_transfers = pending_transfers.filter(transaction_id__in=valid_transfer_ids)
@@ -844,25 +815,8 @@ class ListBudgetTransfer_approvels_View(APIView):
                     if transfer_group_id not in user_approval_groups and transfer_group_id is not None:
                         continue
                     
-                    stage_template = assignment.stage_instance.stage_template
-                    required_level_id = stage_template.required_user_level_id
-                    
-                    # If no required level, allow (open to all)
-                    if not required_level_id:
-                        valid_transfer_ids.append(transfer.transaction_id)
-                        continue
-                    
-                    # If transfer has security group, check user's roles in that group
-                    if transfer_group_id and transfer_group_id in user_roles_by_group:
-                        user_role_ids = user_roles_by_group[transfer_group_id]
-                        if required_level_id in user_role_ids:
-                            valid_transfer_ids.append(transfer.transaction_id)
-                    # If no security group on transfer, check user's roles in any group
-                    elif not transfer_group_id:
-                        for group_roles in user_roles_by_group.values():
-                            if required_level_id in group_roles:
-                                valid_transfer_ids.append(transfer.transaction_id)
-                                break
+                    # User was assigned to this transfer - they can see it in history
+                    valid_transfer_ids.append(transfer.transaction_id)
                 
                 # Get unique transfer IDs
                 valid_transfer_ids = list(set(valid_transfer_ids))
@@ -877,7 +831,7 @@ class ListBudgetTransfer_approvels_View(APIView):
                 # SuperAdmin: get all history where user was assigned
                 user_stage_instances = ApprovalWorkflowStageInstance.objects.filter(
                     assignments__user=request.user
-                ).values_list('workflow_instance__budget_transfer_id', flat=True)
+                ).values_list('workflow_instance__budget_transfer__transaction_id', flat=True)
 
                 history_transfers = xx_BudgetTransfer.objects.filter(
                     transaction_id__in=user_stage_instances
@@ -2036,41 +1990,46 @@ class Approval_Status(APIView):
                 {"detail": "Transaction not found"}, status=status.HTTP_404_NOT_FOUND
             )
 
-        workflow = getattr(transaction_obj, "workflow_instance", None)
-        if not workflow:
+        # Phase 6: Get all workflows for this transfer, ordered by workflow_order
+        workflows = transaction_obj.workflow_instances.all().order_by('workflow_order')
+        if not workflows.exists():
             return Response(
-                {"detail": "No workflow instance for this transaction"},
+                {"detail": "No workflow instances for this transaction"},
                 status=status.HTTP_404_NOT_FOUND,
             )
 
-        # Stage templates in order
-        stage_templates = workflow.template.stages.all().order_by("order_index")
+        # Process all workflows
+        all_workflows_data = []
+        
+        for workflow in workflows:
+            # Stage templates in order
+            stage_templates = workflow.template.stages.all().order_by("order_index")
 
-        # Map of stage_template_id -> stage_instance (if created)
-        stage_instances_qs = workflow.stage_instances.select_related(
-            "stage_template", "workflow_instance"
-        ).all()
-        instances_by_tpl = {si.stage_template_id: si for si in stage_instances_qs}
+            # Map of stage_template_id -> stage_instance (if created)
+            stage_instances_qs = workflow.stage_instances.select_related(
+                "stage_template", "workflow_instance"
+            ).all()
+            instances_by_tpl = {si.stage_template_id: si for si in stage_instances_qs}
 
-        # For rejected workflows, capture the latest reject per order_index to reflect group outcome
-        latest_reject_by_order = {}
-        if workflow.status == ApprovalWorkflowInstance.STATUS_REJECTED:
-            for si in stage_instances_qs:
-                order_idx = si.stage_template.order_index
-                r = (
-                    si.actions.filter(action=ApprovalAction.ACTION_REJECT)
-                    .order_by("-created_at")
-                    .first()
-                )
-                if r and (
-                    order_idx not in latest_reject_by_order
-                    or r.created_at > latest_reject_by_order[order_idx].created_at
-                ):
-                    latest_reject_by_order[order_idx] = r
+            # For rejected workflows, capture the latest reject per order_index to reflect group outcome
+            latest_reject_by_order = {}
+            if workflow.status == ApprovalWorkflowInstance.STATUS_REJECTED:
+                for si in stage_instances_qs:
+                    order_idx = si.stage_template.order_index
+                    r = (
+                        si.actions.filter(action=ApprovalAction.ACTION_REJECT)
+                        .order_by("-created_at")
+                        .first()
+                    )
+                    if r and (
+                        order_idx not in latest_reject_by_order
+                        or r.created_at > latest_reject_by_order[order_idx].created_at
+                    ):
+                        latest_reject_by_order[order_idx] = r
 
-        results = []
+            results = []
 
-        for stpl in stage_templates:
+            for stpl in stage_templates:
             si = instances_by_tpl.get(stpl.id)
 
             stage_info = {
@@ -2163,13 +2122,22 @@ class Approval_Status(APIView):
                 # Fallback
                 stage_info["status"] = inst_status
 
-            results.append(stage_info)
+                results.append(stage_info)
+
+            # Add this workflow's data to the list
+            all_workflows_data.append({
+                "workflow_order": workflow.workflow_order,
+                "workflow_code": workflow.template.code,
+                "workflow_name": workflow.template.name,
+                "workflow_status": workflow.status,
+                "stages": results,
+            })
 
         return Response(
             {
                 "transaction_id": transaction_obj.transaction_id,
-                "workflow_status": workflow.status,
-                "stages": results,
+                "transfer_status": transaction_obj.status,
+                "workflows": all_workflows_data,
             },
             status=status.HTTP_200_OK,
         )

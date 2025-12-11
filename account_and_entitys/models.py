@@ -278,12 +278,12 @@ class EnvelopeManager:
 
         # Get approved transactions
         approved_transactions = base_transactions.filter(
-            transaction__workflow_instance__status=ApprovalWorkflowInstance.STATUS_APPROVED
+            transaction__workflow_instances__status=ApprovalWorkflowInstance.STATUS_APPROVED
         )
         print(f"Approved transactions: {approved_transactions.count()}")
         # Get submitted (in progress) transactions
         submitted_transactions = base_transactions.filter(
-            transaction__workflow_instance__status=ApprovalWorkflowInstance.STATUS_IN_PROGRESS
+            transaction__workflow_instances__status=ApprovalWorkflowInstance.STATUS_IN_PROGRESS
         )
         print(f"Submitted transactions: {submitted_transactions.count()}")
         # Calculate totals for approved transactions

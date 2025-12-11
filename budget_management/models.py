@@ -89,6 +89,18 @@ class xx_BudgetTransfer(models.Model):
                 pass  # New record, no validation needed yet
         
         super().save(*args, **kwargs)
+    
+    @property
+    def workflow_instance(self):
+        """
+        Backward compatibility property to get the active workflow instance.
+        Returns the first pending/in-progress workflow.
+        
+        NOTE: The relationship is now ForeignKey (workflow_instances), not OneToOneField.
+        This property maintains backward compatibility with existing code.
+        """
+        from approvals.models import ApprovalWorkflowInstance
+        return ApprovalWorkflowInstance.get_active_workflow(self)
 
 
 # SELECT * FROM XX_BUDGET_TRANSFER_XX

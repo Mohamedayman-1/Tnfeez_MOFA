@@ -32,6 +32,13 @@ class ApprovalWorkflowStageTemplateInlineSerializer(serializers.ModelSerializer)
         source="required_user_level.name",
         read_only=True,
     )
+    required_role_name = serializers.SerializerMethodField(read_only=True)
+    
+    def get_required_role_name(self, obj):
+        """Return the role name for display in frontend"""
+        if obj.required_role:
+            return f"{obj.required_role.role.name}"
+        return None
     
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -71,6 +78,19 @@ class ApprovalWorkflowTemplateDetailSerializer(serializers.ModelSerializer):
         model = ApprovalWorkflowTemplate
         fields = "__all__"  # includes all workflow fields + stages
 
+    def to_representation(self, instance):
+        """Override to filter out archived stages (order_index >= 9999)."""
+        representation = super().to_representation(instance)
+        
+        # Filter out archived stages that were moved to high order_index due to ProtectedError
+        if 'stages' in representation:
+            representation['stages'] = [
+                stage for stage in representation['stages']
+                if stage.get('order_index', 0) < 9999
+            ]
+        
+        return representation
+
     def create(self, validated_data):
         stages_data = validated_data.pop("stages", [])
         
@@ -97,6 +117,8 @@ class ApprovalWorkflowTemplateDetailSerializer(serializers.ModelSerializer):
         return template
 
     def update(self, instance, validated_data):
+        from django.db.models.deletion import ProtectedError
+        
         stages_data = validated_data.pop("stages", None)
 
         # update workflow template fields
@@ -108,9 +130,19 @@ class ApprovalWorkflowTemplateDetailSerializer(serializers.ModelSerializer):
             existing_stage_ids = [stage.id for stage in instance.stages.all()]
             sent_stage_ids = [s.get("id") for s in stages_data if "id" in s]
 
-            # delete stages not included in update
-            for stage_id in set(existing_stage_ids) - set(sent_stage_ids):
-                ApprovalWorkflowStageTemplate.objects.filter(id=stage_id).delete()
+            # First, move protected stages to archived order_index to avoid UNIQUE constraint conflicts
+            stages_to_delete = set(existing_stage_ids) - set(sent_stage_ids)
+            for stage_id in stages_to_delete:
+                stage = ApprovalWorkflowStageTemplate.objects.get(id=stage_id)
+                try:
+                    # Try to delete the stage
+                    stage.delete()
+                except ProtectedError:
+                    # If deletion fails because stage is in use, move it to archived order_index (9999+)
+                    # This keeps it in the database for existing workflow instances but frees up the order_index
+                    stage.order_index = 9999 + stage.order_index  # Move to archived range
+                    stage.save()
+                    print(f"Cannot delete stage {stage_id} (has active instances), archived to order_index={stage.order_index}")
 
             # update or create stages
             for stage_data in stages_data:
@@ -127,3 +159,100 @@ class ApprovalWorkflowTemplateDetailSerializer(serializers.ModelSerializer):
                     )
 
         return instance
+
+
+# -------------------------------
+# Workflow Template Assignment Serializers (Phase 6)
+# -------------------------------
+class WorkflowTemplateAssignmentSerializer(serializers.ModelSerializer):
+    """Serializer for XX_WorkflowTemplateAssignment - linking workflows to security groups"""
+    
+    security_group_name = serializers.CharField(source="security_group.group_name", read_only=True)
+    workflow_template_name = serializers.CharField(source="workflow_template.name", read_only=True)
+    workflow_template_code = serializers.CharField(source="workflow_template.code", read_only=True)
+    transfer_type = serializers.CharField(source="workflow_template.transfer_type", read_only=True)
+    
+    class Meta:
+        from .models import XX_WorkflowTemplateAssignment
+        model = XX_WorkflowTemplateAssignment
+        fields = [
+            'id',
+            'security_group',
+            'security_group_name',
+            'workflow_template',
+            'workflow_template_name',
+            'workflow_template_code',
+            'transfer_type',
+            'execution_order',
+            'is_active',
+            'created_at',
+            'created_by',
+        ]
+        read_only_fields = ['id', 'created_at', 'created_by']
+    
+    def validate(self, data):
+        """Validate that the combination is unique and execution_order is valid"""
+        security_group = data.get('security_group')
+        workflow_template = data.get('workflow_template')
+        
+        # Check for duplicate assignment
+        from .models import XX_WorkflowTemplateAssignment
+        existing = XX_WorkflowTemplateAssignment.objects.filter(
+            security_group=security_group,
+            workflow_template=workflow_template
+        )
+        
+        # Exclude current instance if updating
+        if self.instance:
+            existing = existing.exclude(pk=self.instance.pk)
+        
+        if existing.exists():
+            raise serializers.ValidationError(
+                f"Workflow template '{workflow_template.code}' is already assigned to security group '{security_group.group_name}'"
+            )
+        
+        return data
+
+
+class BulkAssignWorkflowsSerializer(serializers.Serializer):
+    """Serializer for bulk assigning multiple workflows to a security group"""
+    
+    security_group_id = serializers.IntegerField()
+    workflow_assignments = serializers.ListField(
+        child=serializers.DictField(child=serializers.IntegerField()),
+        help_text="List of {workflow_template_id: int, execution_order: int}"
+    )
+    
+    def validate_security_group_id(self, value):
+        from user_management.models import XX_SecurityGroup
+        if not XX_SecurityGroup.objects.filter(id=value, is_active=True).exists():
+            raise serializers.ValidationError("Security group not found or inactive")
+        return value
+    
+    def validate_workflow_assignments(self, value):
+        """Validate workflow templates exist and execution orders are unique"""
+        from .models import ApprovalWorkflowTemplate
+        
+        if not value:
+            raise serializers.ValidationError("At least one workflow assignment required")
+        
+        workflow_ids = [item.get('workflow_template_id') for item in value]
+        execution_orders = [item.get('execution_order') for item in value]
+        
+        # Check for duplicates
+        if len(workflow_ids) != len(set(workflow_ids)):
+            raise serializers.ValidationError("Duplicate workflow templates in assignment list")
+        
+        if len(execution_orders) != len(set(execution_orders)):
+            raise serializers.ValidationError("Duplicate execution orders in assignment list")
+        
+        # Validate workflow templates exist
+        existing_count = ApprovalWorkflowTemplate.objects.filter(
+            id__in=workflow_ids,
+            is_active=True
+        ).count()
+        
+        if existing_count != len(workflow_ids):
+            raise serializers.ValidationError("One or more workflow templates not found or inactive")
+        
+        return value

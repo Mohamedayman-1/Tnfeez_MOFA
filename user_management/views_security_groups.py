@@ -239,6 +239,68 @@ class SecurityGroupDetailView(APIView):
         })
 
 
+class SecurityGroupDeletePermanentView(APIView):
+    """
+    Permanently delete a security group.
+    
+    DELETE /api/auth/security-groups/<group_id>/delete-permanent/
+    """
+    permission_classes = [IsAuthenticated]
+    
+    def delete(self, request, group_id):
+        """Permanently delete a security group and all its relationships."""
+        try:
+            group = XX_SecurityGroup.objects.get(pk=group_id)
+        except XX_SecurityGroup.DoesNotExist:
+            return Response(
+                {'error': 'Security group not found'},
+                status=status.HTTP_404_NOT_FOUND
+            )
+        
+        group_name = group.group_name
+        
+        # Check if there are active members
+        active_members_count = XX_UserGroupMembership.objects.filter(
+            security_group=group,
+            is_active=True
+        ).count()
+        
+        if active_members_count > 0:
+            return Response(
+                {
+                    'error': 'Cannot delete security group',
+                    'message': f'{active_members_count} active member(s) are in this group. Please remove all members first.',
+                    'active_members_count': active_members_count
+                },
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        # Check if there are budget transfers using this security group
+        from budget_management.models import xx_BudgetTransfer
+        transfers_count = xx_BudgetTransfer.objects.filter(security_group=group).count()
+        
+        if transfers_count > 0:
+            return Response(
+                {
+                    'error': 'Cannot delete security group',
+                    'message': f'{transfers_count} budget transfer(s) are associated with this group. Please reassign or delete them first.',
+                    'transfers_count': transfers_count
+                },
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        # Permanently delete (cascade will handle related records)
+        group.delete()
+        
+        return Response({
+            'success': True,
+            'message': f'Security group "{group_name}" has been permanently deleted',
+            'deleted_group': {
+                'group_name': group_name
+            }
+        })
+
+
 class SecurityGroupRolesView(APIView):
     """
     Manage roles for a security group.
@@ -332,7 +394,7 @@ class SecurityGroupRolesView(APIView):
             )
     
     def delete(self, request, group_id, role_id):
-        """Remove a role from a security group."""
+        """Remove a role from a security group (soft delete - sets is_active=False)."""
         try:
             group_role = XX_SecurityGroupRole.objects.get(pk=role_id, security_group_id=group_id)
         except XX_SecurityGroupRole.DoesNotExist:
@@ -345,7 +407,101 @@ class SecurityGroupRolesView(APIView):
         group_role.save()
         
         return Response({
-            'message': f"Role '{group_role.role.name}' removed from group"
+            'message': f"Role '{group_role.role.name}' removed from group (deactivated)"
+        })
+
+
+class SecurityGroupRoleActivateView(APIView):
+    """
+    Reactivate an inactive role in a security group.
+    
+    PATCH /api/auth/security-groups/<group_id>/roles/<role_id>/activate/
+    """
+    permission_classes = [IsAuthenticated]
+    
+    def patch(self, request, group_id, role_id):
+        """Reactivate an inactive role."""
+        try:
+            group_role = XX_SecurityGroupRole.objects.get(pk=role_id, security_group_id=group_id)
+        except XX_SecurityGroupRole.DoesNotExist:
+            return Response(
+                {'error': 'Role not found in this security group'},
+                status=status.HTTP_404_NOT_FOUND
+            )
+        
+        if group_role.is_active:
+            return Response(
+                {
+                    'error': 'Role is already active',
+                    'role_name': group_role.role.name
+                },
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        group_role.is_active = True
+        group_role.save()
+        
+        return Response({
+            'success': True,
+            'message': f"Role '{group_role.role.name}' has been reactivated in group '{group_role.security_group.group_name}'",
+            'role': {
+                'id': group_role.id,
+                'role_id': group_role.role.id,
+                'role_name': group_role.role.name,
+                'is_active': group_role.is_active,
+                'group_name': group_role.security_group.group_name
+            }
+        })
+
+
+class SecurityGroupRoleDeletePermanentView(APIView):
+    """
+    Permanently delete a role from a security group.
+    
+    DELETE /api/auth/security-groups/<group_id>/roles/<role_id>/delete-permanent/
+    """
+    permission_classes = [IsAuthenticated]
+    
+    def delete(self, request, group_id, role_id):
+        """Permanently delete a role from the security group."""
+        try:
+            group_role = XX_SecurityGroupRole.objects.get(pk=role_id, security_group_id=group_id)
+        except XX_SecurityGroupRole.DoesNotExist:
+            return Response(
+                {'error': 'Role not found in this security group'},
+                status=status.HTTP_404_NOT_FOUND
+            )
+        
+        role_name = group_role.role.name
+        group_name = group_role.security_group.group_name
+        
+        # Check if any active members are using this role
+        active_members_count = XX_UserGroupMembership.objects.filter(
+            security_group_id=group_id,
+            is_active=True,
+            assigned_roles__contains=[role_id]
+        ).count()
+        
+        if active_members_count > 0:
+            return Response(
+                {
+                    'error': 'Cannot delete role',
+                    'message': f'{active_members_count} active member(s) are assigned this role. Please remove the role from members first.',
+                    'active_members_count': active_members_count
+                },
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        # Permanently delete
+        group_role.delete()
+        
+        return Response({
+            'success': True,
+            'message': f"Role '{role_name}' has been permanently deleted from group '{group_name}'",
+            'deleted_role': {
+                'role_name': role_name,
+                'group_name': group_name
+            }
         })
 
 
@@ -1398,4 +1554,60 @@ class SecurityGroupAvailableSegmentsView(APIView):
             'group_id': group.id,
             'group_name': group.group_name,
             'segment_types': list(segment_types.values())
+        })
+
+
+class AllSecurityGroupRolesView(APIView):
+    """
+    Get ALL security group roles across all groups.
+    Used for workflow stage configuration where we need to select a role.
+    
+    GET /api/auth/security-group-roles/all/
+    
+    Query Parameters:
+    - security_group_id (optional): Filter by specific security group
+    - is_active (optional): Filter by active status (default: true)
+    
+    Returns list of XX_SecurityGroupRole records with group and role details.
+    """
+    permission_classes = [IsAuthenticated]
+    
+    def get(self, request):
+        """List all security group roles."""
+        security_group_id = request.query_params.get('security_group_id')
+        is_active = request.query_params.get('is_active', 'true').lower() == 'true'
+        
+        # Build queryset
+        queryset = XX_SecurityGroupRole.objects.select_related(
+            'security_group', 'role'
+        ).all()
+        
+        if security_group_id:
+            queryset = queryset.filter(security_group_id=security_group_id)
+        
+        if is_active is not None:
+            queryset = queryset.filter(is_active=is_active)
+        
+        queryset = queryset.order_by('security_group__group_name', 'role__level_order')
+        
+        # Format response
+        roles_data = []
+        for group_role in queryset:
+            roles_data.append({
+                'id': group_role.id,
+                'security_group_id': group_role.security_group.id,
+                'security_group_name': group_role.security_group.group_name,
+                'role_id': group_role.role.id,
+                'role_name': group_role.role.name,
+                'role_description': group_role.role.description or '',
+                'level_order': group_role.role.level_order,
+                'is_active': group_role.is_active,
+                'default_abilities': group_role.default_abilities or [],
+                'display_name': f"{group_role.security_group.group_name} - {group_role.role.name}"
+            })
+        
+        return Response({
+            'success': True,
+            'count': len(roles_data),
+            'roles': roles_data
         })
