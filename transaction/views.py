@@ -446,6 +446,68 @@ class TransactionTransferCreateView(APIView):
         """
         
         # Check if the data is a list/array or single object
+
+
+        user = request.user
+        
+        # SuperAdmin bypasses all security group checks
+        user_memberships = None
+        if user.role == 1:
+            user_approval_groups = None  # None = see all groups
+        else:
+            # Check if user has approval permissions
+            from user_management.models import XX_UserGroupMembership
+            
+            # Get user's security group memberships with approval access
+            # Check custom_abilities or role's default_abilities for 'APPROVE'
+            user_memberships = XX_UserGroupMembership.objects.filter(
+                user=user,
+                is_active=True
+            ).prefetch_related('assigned_roles')
+            
+            user_approval_groups = []
+            for membership in user_memberships:
+                # Check custom_abilities first
+                if membership.custom_abilities and 'TRANSFER' in membership.custom_abilities:
+                    user_approval_groups.append(membership.security_group_id)
+                    continue
+                
+                # Check role's default_abilities
+                for role in membership.assigned_roles.all():
+                    if role.is_active and role.default_abilities and 'TRANSFER' in role.default_abilities:
+                        user_approval_groups.append(membership.security_group_id)
+                        break
+            
+            if not user_approval_groups:
+                # User has no approval access in any security group
+                print(f"DEBUG: User {user.username} (ID: {user.id}) has no TRANSFER permissions")
+                print(f"DEBUG: User memberships: {user_memberships.count()}")
+                for membership in user_memberships:
+                    print(f"  - Group: {membership.security_group.group_name}")
+                    print(f"    Custom abilities: {membership.custom_abilities}")
+                    for role in membership.assigned_roles.all():
+                        print(f"    Role: {role.role.name}, Active: {role.is_active}, Abilities: {role.default_abilities}")
+                
+                return Response(
+                    {
+                        "success": False,
+                        "error": "ACCESS_DENIED",
+                        "message": "You do not have approval permissions. Please contact your administrator to grant you approval access in a security group.",
+                        "details": "Your account is not assigned to any security group with approval permissions.",
+                        "results": []
+                    },
+                    status=status.HTTP_403_FORBIDDEN
+                )
+
+
+
+
+
+
+
+
+
+
         if isinstance(request.data, list):
             # Handle array of transfers
             if not request.data:
@@ -616,6 +678,68 @@ class TransactionTransferListView(APIView):
 
     def get(self, request):
         transaction_id = request.query_params.get("transaction")
+
+        user = request.user
+        
+        # SuperAdmin bypasses all security group checks
+        user_memberships = None
+        if user.role == 1:
+            user_approval_groups = None  # None = see all groups
+        else:
+            # Check if user has approval permissions
+            from user_management.models import XX_UserGroupMembership
+            
+            # Get user's security group memberships with approval access
+            # Check custom_abilities or role's default_abilities for 'APPROVE'
+            user_memberships = XX_UserGroupMembership.objects.filter(
+                user=user,
+                is_active=True
+            ).prefetch_related('assigned_roles')
+            
+            user_approval_groups = []
+            for membership in user_memberships:
+                # Check custom_abilities first
+                if membership.custom_abilities and 'TRANSFER' in membership.custom_abilities:
+                    user_approval_groups.append(membership.security_group_id)
+                    continue
+                
+                # Check role's default_abilities
+                for role in membership.assigned_roles.all():
+                    if role.is_active and role.default_abilities and 'TRANSFER' in role.default_abilities:
+                        user_approval_groups.append(membership.security_group_id)
+                        break
+            
+            if not user_approval_groups:
+                # User has no approval access in any security group
+                print(f"DEBUG: User {user.username} (ID: {user.id}) has no TRANSFER permissions")
+                print(f"DEBUG: User memberships: {user_memberships.count()}")
+                for membership in user_memberships:
+                    print(f"  - Group: {membership.security_group.group_name}")
+                    print(f"    Custom abilities: {membership.custom_abilities}")
+                    for role in membership.assigned_roles.all():
+                        print(f"    Role: {role.role.name}, Active: {role.is_active}, Abilities: {role.default_abilities}")
+                # from rest_framework import status
+                return Response(
+                    {
+                        "success": False,
+                        "error": "ACCESS_DENIED",
+                        "message": "You do not have approval permissions. Please contact your administrator to grant you approval access in a security group.",
+                        "details": "Your account is not assigned to any security group with approval permissions.",
+                        "results": []
+                        
+                    },
+                    status=rest_framework.status.HTTP_403_FORBIDDEN
+                )
+
+
+
+
+
+
+
+
+
+
         print(f"Transaction ID: {transaction_id}")
         if not transaction_id:
             return Response(
