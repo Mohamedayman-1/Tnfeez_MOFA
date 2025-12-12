@@ -184,6 +184,7 @@ class WorkflowTemplateAssignmentSerializer(serializers.ModelSerializer):
             'workflow_template_code',
             'transfer_type',
             'execution_order',
+            'transaction_code_filter',
             'is_active',
             'created_at',
             'created_by',
@@ -219,8 +220,8 @@ class BulkAssignWorkflowsSerializer(serializers.Serializer):
     
     security_group_id = serializers.IntegerField()
     workflow_assignments = serializers.ListField(
-        child=serializers.DictField(child=serializers.IntegerField()),
-        help_text="List of {workflow_template_id: int, execution_order: int}"
+        child=serializers.DictField(),
+        help_text="List of {workflow_template_id: int, execution_order: int, transaction_code_filter: str|null}"
     )
     
     def validate_security_group_id(self, value):

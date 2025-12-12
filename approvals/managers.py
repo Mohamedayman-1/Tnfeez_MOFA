@@ -88,18 +88,30 @@ class ApprovalManager:
             print(f"[WARNING] Transfer {budget_transfer.code} has no security group - no workflows created")
             return []
         
+        # Get transaction code prefix (e.g., "FAR", "DFR")
+        transaction_code_prefix = budget_transfer.code[:3] if budget_transfer.code and len(budget_transfer.code) >= 3 else None
+        
         # Get all workflow template assignments for this security group
+        # Filter by transaction_code_filter if specified
+        from django.db.models import Q
         assignments = XX_WorkflowTemplateAssignment.objects.filter(
             security_group=budget_transfer.security_group,
             is_active=True
+        ).filter(
+            Q(transaction_code_filter__isnull=True) |  # No filter = applies to all
+            Q(transaction_code_filter='') |  # Empty filter = applies to all
+            Q(transaction_code_filter=transaction_code_prefix)  # Matches transaction code
         ).select_related('workflow_template').order_by('execution_order')
         
         if not assignments.exists():
-            print(f"[WARNING] No workflow templates assigned to security group {budget_transfer.security_group.group_name}")
+            print(f"[WARNING] No workflow templates assigned to security group {budget_transfer.security_group.group_name} for transaction code {transaction_code_prefix}")
             return []
         
+        print(f"[INFO] Found {assignments.count()} workflows for {budget_transfer.code} (prefix: {transaction_code_prefix})")
+        
         created_instances = []
-        for assignment in assignments:
+        # Re-number execution_order sequentially (1, 2, 3...) for this transaction code group
+        for index, assignment in enumerate(assignments, start=1):
             template = assignment.workflow_template
             
             # Validate quorum config sanity
@@ -113,16 +125,16 @@ class ApprovalManager:
                             f"Invalid quorum_count {st.quorum_count} on stage {st}"
                         )
             
-            # Create workflow instance with execution order from assignment
+            # Create workflow instance with sequential execution order (1, 2, 3 for this transaction code)
             instance = ApprovalWorkflowInstance.objects.create(
                 budget_transfer=budget_transfer,
                 template=template,
                 workflow_assignment=assignment,
-                execution_order=assignment.execution_order,
+                execution_order=index,  # Sequential per transaction code: 1, 2, 3...
                 status=ApprovalWorkflowInstance.STATUS_PENDING,
             )
             created_instances.append(instance)
-            print(f"[INFO] Created workflow instance: {template.code} (Order: {assignment.execution_order})")
+            print(f"[INFO] Created workflow instance: {template.code} (Order: {index}, Filter: {assignment.transaction_code_filter or 'ALL'})")
         
         return created_instances
 

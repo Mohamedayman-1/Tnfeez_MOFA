@@ -5,7 +5,8 @@ from .models import (
     ApprovalWorkflowInstance,
     ApprovalWorkflowStageInstance,
     ApprovalAssignment,
-    ApprovalAction
+    ApprovalAction,
+    XX_WorkflowTemplateAssignment
 )
 
 
@@ -93,3 +94,28 @@ class ApprovalActionAdmin(admin.ModelAdmin):
     search_fields = ['user__username', 'assignment__user__username']
     readonly_fields = ['created_at']
     autocomplete_fields = ['assignment', 'user']
+
+
+@admin.register(XX_WorkflowTemplateAssignment)
+class WorkflowTemplateAssignmentAdmin(admin.ModelAdmin):
+    list_display = ['security_group', 'workflow_template', 'execution_order', 'transaction_code_filter', 'is_active', 'created_at']
+    list_filter = ['is_active', 'transaction_code_filter', 'created_at']
+    search_fields = ['security_group__group_name', 'workflow_template__code', 'workflow_template__name']
+    autocomplete_fields = ['security_group', 'workflow_template', 'created_by']
+    fieldsets = (
+        ('Assignment', {
+            'fields': ('security_group', 'workflow_template', 'execution_order')
+        }),
+        ('Transaction Filter', {
+            'fields': ('transaction_code_filter',),
+            'description': 'Filter workflows by transaction code prefix (e.g., "FAR", "DFR"). Leave blank to apply to all transactions.'
+        }),
+        ('Status', {
+            'fields': ('is_active',)
+        }),
+        ('Metadata', {
+            'fields': ('created_by',),
+            'classes': ('collapse',)
+        }),
+    )
+    readonly_fields = ['created_at']

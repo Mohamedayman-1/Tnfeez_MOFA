@@ -394,6 +394,12 @@ class XX_WorkflowTemplateAssignment(models.Model):
 		default=1,
 		help_text="Order of execution (1 = first workflow, 2 = second, etc.)"
 	)
+	transaction_code_filter = models.CharField(
+		max_length=10,
+		null=True,
+		blank=True,
+		help_text="Transaction code prefix filter (e.g., 'FAR', 'DFR'). Leave blank for all transactions."
+	)
 	is_active = models.BooleanField(
 		default=True,
 		help_text="Whether this assignment is active"

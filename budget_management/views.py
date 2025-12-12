@@ -1990,8 +1990,8 @@ class Approval_Status(APIView):
                 {"detail": "Transaction not found"}, status=status.HTTP_404_NOT_FOUND
             )
 
-        # Phase 6: Get all workflows for this transfer, ordered by workflow_order
-        workflows = transaction_obj.workflow_instances.all().order_by('workflow_order')
+        # Phase 6: Get all workflows for this transfer, ordered by execution_order
+        workflows = transaction_obj.workflow_instances.all().order_by('execution_order')
         if not workflows.exists():
             return Response(
                 {"detail": "No workflow instances for this transaction"},
@@ -2030,103 +2030,103 @@ class Approval_Status(APIView):
             results = []
 
             for stpl in stage_templates:
-            si = instances_by_tpl.get(stpl.id)
+                si = instances_by_tpl.get(stpl.id)
 
-            stage_info = {
-                "order_index": stpl.order_index,
-                "name": stpl.name,
-                "decision_policy": stpl.decision_policy,
-            }
+                stage_info = {
+                    "order_index": stpl.order_index,
+                    "name": stpl.name,
+                    "decision_policy": stpl.decision_policy,
+                }
 
-            # Determine status for this stage
-            if si is None:
-                # Not yet instantiated -> pending (not started)
-                stage_info["status"] = "pending"
-                results.append(stage_info)
-                continue
+                # Determine status for this stage
+                if si is None:
+                    # Not yet instantiated -> pending (not started)
+                    stage_info["status"] = "pending"
+                    results.append(stage_info)
+                    continue
 
-            # Map instance status to friendly label
-            inst_status = si.status
-            if inst_status == "active":
-                stage_info["status"] = "in_progress"
-            elif inst_status == "pending":
-                stage_info["status"] = "pending"
-            elif inst_status == "skipped":
-                stage_info["status"] = "skipped"
-            elif inst_status in ("completed", "cancelled"):
-                # Determine outcome based on actions
-                # If any reject action exists on this stage -> rejected else approved (or skipped above)
-                last_reject = (
-                    si.actions.filter(action=ApprovalAction.ACTION_REJECT)
-                    .order_by("-created_at")
-                    .first()
-                )
-                if last_reject:
-                    stage_info["status"] = "rejected"
-                    actor = last_reject.user
-                    stage_info["acted_by"] = {
-                        "id": getattr(actor, "id", None),
-                        "username": getattr(
-                            actor, "username", "SYSTEM" if actor is None else None
-                        ),
-                        "action_at": (
-                            last_reject.created_at.isoformat()
-                            if getattr(last_reject, "created_at", None)
-                            else None
-                        ),
-                    }
-                    stage_info["comment"] = last_reject.comment
-                else:
-                    # If workflow is rejected and another parallel stage in this order was rejected,
-                    # mark this stage as rejected to reflect the group outcome.
-                    group_reject = latest_reject_by_order.get(stpl.order_index)
-                    if group_reject:
-                        stage_info["status"] = "rejected"
-                        actor = group_reject.user
-                        stage_info["acted_by"] = {
-                            "id": getattr(actor, "id", None),
-                            "username": getattr(
-                                actor, "username", "SYSTEM" if actor is None else None
-                            ),
-                            "action_at": (
-                                group_reject.created_at.isoformat()
-                                if getattr(group_reject, "created_at", None)
-                                else None
-                            ),
-                        }
-                        stage_info["comment"] = group_reject.comment
-                        results.append(stage_info)
-                        continue
-                    # Approved if there is at least one approve action (user or system auto-skip approve)
-                    last_approve = (
-                        si.actions.filter(action=ApprovalAction.ACTION_APPROVE)
+                # Map instance status to friendly label
+                inst_status = si.status
+                if inst_status == "active":
+                    stage_info["status"] = "in_progress"
+                elif inst_status == "pending":
+                    stage_info["status"] = "pending"
+                elif inst_status == "skipped":
+                    stage_info["status"] = "skipped"
+                elif inst_status in ("completed", "cancelled"):
+                    # Determine outcome based on actions
+                    # If any reject action exists on this stage -> rejected else approved (or skipped above)
+                    last_reject = (
+                        si.actions.filter(action=ApprovalAction.ACTION_REJECT)
                         .order_by("-created_at")
                         .first()
                     )
-                    stage_info["status"] = "approved" if last_approve else "completed"
-                    if last_approve:
-                        actor = last_approve.user
+                    if last_reject:
+                        stage_info["status"] = "rejected"
+                        actor = last_reject.user
                         stage_info["acted_by"] = {
                             "id": getattr(actor, "id", None),
                             "username": getattr(
                                 actor, "username", "SYSTEM" if actor is None else None
                             ),
                             "action_at": (
-                                last_approve.created_at.isoformat()
-                                if getattr(last_approve, "created_at", None)
+                                last_reject.created_at.isoformat()
+                                if getattr(last_reject, "created_at", None)
                                 else None
                             ),
                         }
-                        stage_info["comment"] = last_approve.comment
-            else:
-                # Fallback
-                stage_info["status"] = inst_status
+                        stage_info["comment"] = last_reject.comment
+                    else:
+                        # If workflow is rejected and another parallel stage in this order was rejected,
+                        # mark this stage as rejected to reflect the group outcome.
+                        group_reject = latest_reject_by_order.get(stpl.order_index)
+                        if group_reject:
+                            stage_info["status"] = "rejected"
+                            actor = group_reject.user
+                            stage_info["acted_by"] = {
+                                "id": getattr(actor, "id", None),
+                                "username": getattr(
+                                    actor, "username", "SYSTEM" if actor is None else None
+                                ),
+                                "action_at": (
+                                    group_reject.created_at.isoformat()
+                                    if getattr(group_reject, "created_at", None)
+                                    else None
+                                ),
+                            }
+                            stage_info["comment"] = group_reject.comment
+                            results.append(stage_info)
+                            continue
+                        # Approved if there is at least one approve action (user or system auto-skip approve)
+                        last_approve = (
+                            si.actions.filter(action=ApprovalAction.ACTION_APPROVE)
+                            .order_by("-created_at")
+                            .first()
+                        )
+                        stage_info["status"] = "approved" if last_approve else "completed"
+                        if last_approve:
+                            actor = last_approve.user
+                            stage_info["acted_by"] = {
+                                "id": getattr(actor, "id", None),
+                                "username": getattr(
+                                    actor, "username", "SYSTEM" if actor is None else None
+                                ),
+                                "action_at": (
+                                    last_approve.created_at.isoformat()
+                                    if getattr(last_approve, "created_at", None)
+                                    else None
+                                ),
+                            }
+                            stage_info["comment"] = last_approve.comment
+                else:
+                    # Fallback
+                    stage_info["status"] = inst_status
 
                 results.append(stage_info)
 
             # Add this workflow's data to the list
             all_workflows_data.append({
-                "workflow_order": workflow.workflow_order,
+                "execution_order": workflow.execution_order,
                 "workflow_code": workflow.template.code,
                 "workflow_name": workflow.template.name,
                 "workflow_status": workflow.status,

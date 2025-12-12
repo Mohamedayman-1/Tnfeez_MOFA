@@ -203,10 +203,16 @@ class BulkAssignWorkflowsView(APIView):
                 id=item['workflow_template_id']
             )
             
+            # Get transaction_code_filter (optional)
+            transaction_code_filter = item.get('transaction_code_filter')
+            if transaction_code_filter == '':  # Empty string = null
+                transaction_code_filter = None
+            
             assignment = XX_WorkflowTemplateAssignment.objects.create(
                 security_group=security_group,
                 workflow_template=workflow_template,
                 execution_order=item['execution_order'],
+                transaction_code_filter=transaction_code_filter,
                 is_active=True,
                 created_by=request.user
             )
