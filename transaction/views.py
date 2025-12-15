@@ -1451,6 +1451,35 @@ class transcationtransferSubmit(APIView):
                     transaction=transaction_id
                 )
                 code = xx_BudgetTransfer.objects.get(transaction_id=transaction_id).code
+
+                # Execute dynamic validation workflows
+                from django_dynamic_validation.views_helpers import execute_and_validate
+                from django_dynamic_validation import execution_points
+                from django_dynamic_validation.datasource_params import StandardParams
+ 
+                validation_error = execute_and_validate(
+                    execution_point=execution_points.on_transfer_submit,
+                    context_data={StandardParams.TRANSACTION_ID: transaction_id},
+                    request=request,
+                    user=request.user
+                )
+                if validation_error:
+                    return validation_error
+               
+                for transfer in transfers:
+                    validation_error = execute_and_validate(
+                        execution_point=execution_points.on_transfer_line_submit,
+                        context_data={
+                            StandardParams.TRANSACTION_ID: transaction_id,
+                            StandardParams.TRANSFER_ID: transfer.transfer_id
+                        },
+                        request=request,
+                        user=request.user
+                    )
+                    if validation_error:
+                        return validation_error
+               
+
                 print(f"Transfers found: {transfers.count()}")
                 if len(transfers) < 2 and code[0:3] == "FAR":
                     return Response(
