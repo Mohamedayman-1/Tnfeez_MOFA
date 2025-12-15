@@ -1,0 +1,348 @@
+{
+  "info": {
+    "name": "User Profile API",
+    "description": "Collection for testing User Profile endpoints that return comprehensive user information including groups, roles, permissions, and segment access",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "auth": {
+    "type": "bearer",
+    "bearer": [
+      {
+        "key": "token",
+        "value": "{{access_token}}",
+        "type": "string"
+      }
+    ]
+  },
+  "variable": [
+    {
+      "key": "base_url",
+      "value": "http://localhost:8000",
+      "type": "string"
+    },
+    {
+      "key": "access_token",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "user_id",
+      "value": "1",
+      "type": "string"
+    }
+  ],
+  "item": [
+    {
+      "name": "Authentication",
+      "item": [
+        {
+          "name": "Login",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "if (pm.response.code === 200) {",
+                  "    var jsonData = pm.response.json();",
+                  "    pm.collectionVariables.set(\"access_token\", jsonData.access);",
+                  "    console.log(\"Access token saved:\", jsonData.access);",
+                  "}"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"username\": \"testuser\",\n    \"password\": \"testpass123\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/auth/login/",
+              "host": ["{{base_url}}"],
+              "path": ["api", "auth", "login", ""]
+            },
+            "description": "Login to get access token. Token is automatically saved to collection variables."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "User Profile - Comprehensive",
+      "item": [
+        {
+          "name": "Get My Profile (Comprehensive)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/auth/profile/",
+              "host": ["{{base_url}}"],
+              "path": ["api", "auth", "profile", ""]
+            },
+            "description": "Get comprehensive profile of the currently authenticated user.\n\nReturns:\n- Basic user information\n- Security group memberships with roles and abilities\n- Direct segment access grants (Phase 4)\n- Direct abilities on segment combinations (Phase 4)\n- Summary statistics"
+          },
+          "response": []
+        },
+        {
+          "name": "Get User Profile by ID (Admin Only)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/auth/profile/?user_id={{user_id}}",
+              "host": ["{{base_url}}"],
+              "path": ["api", "auth", "profile", ""],
+              "query": [
+                {
+                  "key": "user_id",
+                  "value": "{{user_id}}",
+                  "description": "ID of the user to view (admin/superadmin only)"
+                }
+              ]
+            },
+            "description": "Get comprehensive profile of a specific user by ID.\n\n**Permission Required:** Admin or SuperAdmin\n\nReturns the same comprehensive data as 'Get My Profile' but for a specified user."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "User Profile - Simple",
+      "item": [
+        {
+          "name": "Get My Profile (Simple)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/auth/profile/simple/",
+              "host": ["{{base_url}}"],
+              "path": ["api", "auth", "profile", "simple", ""]
+            },
+            "description": "Get lightweight profile of the currently authenticated user.\n\nReturns:\n- User ID, username, role, and level\n- List of groups with roles and abilities\n- Boolean flag indicating if user is assigned to any groups\n\nUse this endpoint when you only need basic information without detailed segment access data."
+          },
+          "response": []
+        },
+        {
+          "name": "Get User Profile by ID (Simple - Admin Only)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/auth/profile/simple/?user_id={{user_id}}",
+              "host": ["{{base_url}}"],
+              "path": ["api", "auth", "profile", "simple", ""],
+              "query": [
+                {
+                  "key": "user_id",
+                  "value": "{{user_id}}",
+                  "description": "ID of the user to view"
+                }
+              ]
+            },
+            "description": "Get lightweight profile of a specific user by ID.\n\n**Permission Required:** Admin or SuperAdmin"
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Test Scenarios",
+      "item": [
+        {
+          "name": "Test: Regular User Views Own Profile",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/auth/profile/",
+              "host": ["{{base_url}}"],
+              "path": ["api", "auth", "profile", ""]
+            },
+            "description": "**Expected Result:** 200 OK with full profile data\n\n**Test Case:** Verify that authenticated users can view their own comprehensive profile including all groups, roles, permissions, and segment access."
+          },
+          "response": []
+        },
+        {
+          "name": "Test: Regular User Tries to View Another User (Should Fail)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test(\"Status code is 403 Forbidden\", function () {",
+                  "    pm.response.to.have.status(403);",
+                  "});",
+                  "",
+                  "pm.test(\"Error message indicates permission denied\", function () {",
+                  "    var jsonData = pm.response.json();",
+                  "    pm.expect(jsonData).to.have.property('error');",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/auth/profile/?user_id=999",
+              "host": ["{{base_url}}"],
+              "path": ["api", "auth", "profile", ""],
+              "query": [
+                {
+                  "key": "user_id",
+                  "value": "999",
+                  "description": "Another user's ID"
+                }
+              ]
+            },
+            "description": "**Expected Result:** 403 Forbidden\n\n**Test Case:** Verify that regular users (non-admin) cannot view other users' profiles. This tests the permission system."
+          },
+          "response": []
+        },
+        {
+          "name": "Test: Unauthenticated Access (Should Fail)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test(\"Status code is 401 Unauthorized\", function () {",
+                  "    pm.response.to.have.status(401);",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "auth": {
+              "type": "noauth"
+            },
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/auth/profile/",
+              "host": ["{{base_url}}"],
+              "path": ["api", "auth", "profile", ""]
+            },
+            "description": "**Expected Result:** 401 Unauthorized\n\n**Test Case:** Verify that unauthenticated requests are properly rejected."
+          },
+          "response": []
+        },
+        {
+          "name": "Test: User with No Groups",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/auth/profile/",
+              "host": ["{{base_url}}"],
+              "path": ["api", "auth", "profile", ""]
+            },
+            "description": "**Expected Result:** 200 OK with empty arrays for groups\n\n**Test Case:** Verify that users with no group memberships still get a valid response with empty security_groups array and summary showing 0 memberships.\n\n**Setup Required:** Login with a user that has no group assignments."
+          },
+          "response": []
+        },
+        {
+          "name": "Test: Compare Simple vs Comprehensive Response Time",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/auth/profile/simple/",
+              "host": ["{{base_url}}"],
+              "path": ["api", "auth", "profile", "simple", ""]
+            },
+            "description": "**Expected Result:** Simple endpoint should be faster\n\n**Test Case:** Compare response times between simple and comprehensive endpoints. Simple should be significantly faster, especially for users with many groups and segments.\n\n**How to Test:**\n1. Run this request and note the response time\n2. Run 'Get My Profile (Comprehensive)' and note the response time\n3. Simple should be 30-50% faster"
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Related Endpoints",
+      "item": [
+        {
+          "name": "Get User Memberships (Alternative)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/auth/users/{{user_id}}/memberships/",
+              "host": ["{{base_url}}"],
+              "path": ["api", "auth", "users", "{{user_id}}", "memberships", ""]
+            },
+            "description": "Alternative endpoint for getting user's group memberships.\n\nThis is a Phase 5 endpoint that focuses specifically on memberships without the comprehensive profile data."
+          },
+          "response": []
+        },
+        {
+          "name": "Get User Accessible Segments (Alternative)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/auth/users/{{user_id}}/accessible-segments/",
+              "host": ["{{base_url}}"],
+              "path": ["api", "auth", "users", "{{user_id}}", "accessible-segments", ""]
+            },
+            "description": "Alternative endpoint for getting segments accessible to a user.\n\nThis is a Phase 5 endpoint that focuses specifically on segment access."
+          },
+          "response": []
+        },
+        {
+          "name": "Get User Segment Access List (Phase 4)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/auth/phase4/access/list?user_id={{user_id}}",
+              "host": ["{{base_url}}"],
+              "path": ["api", "auth", "phase4", "access", "list"],
+              "query": [
+                {
+                  "key": "user_id",
+                  "value": "{{user_id}}"
+                }
+              ]
+            },
+            "description": "Get direct segment access grants (Phase 4 feature) for a user.\n\nThis shows segment-level permissions assigned outside of security groups."
+          },
+          "response": []
+        },
+        {
+          "name": "Get User Abilities (Phase 4)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/auth/phase4/abilities/user-abilities?user_id={{user_id}}",
+              "host": ["{{base_url}}"],
+              "path": ["api", "auth", "phase4", "abilities", "user-abilities"],
+              "query": [
+                {
+                  "key": "user_id",
+                  "value": "{{user_id}}"
+                }
+              ]
+            },
+            "description": "Get direct abilities on segment combinations (Phase 4 feature) for a user."
+          },
+          "response": []
+        }
+      ]
+    }
+  ]
+}

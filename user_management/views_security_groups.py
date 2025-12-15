@@ -1523,7 +1523,10 @@ class SecurityGroupAvailableSegmentsView(APIView):
         # Query available segments
         available_segments = XX_Segment.objects.exclude(
             id__in=existing_segment_ids
-        ).filter(is_active=True).select_related('segment_type')
+        ).filter(
+            is_active=True,
+            segment_type__is_required=True,
+        ).select_related('segment_type')
         
         if segment_type_id:
             available_segments = available_segments.filter(

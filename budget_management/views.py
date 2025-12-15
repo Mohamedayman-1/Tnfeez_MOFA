@@ -18,7 +18,7 @@ from oracle_fbdi_integration.utilities.Status import wait_for_job
 from oracle_fbdi_integration.utilities.journal_integration import create_and_upload_journal
 from oracle_fbdi_integration.utilities.budget_integration import create_and_upload_budget
 
-from user_management.models import xx_User, xx_notification
+from user_management.models import xx_User, xx_notification, XX_UserGroupMembership
 from .models import (
     filter_budget_transfers_all_in_entities,
     xx_BudgetTransfer,
@@ -58,6 +58,7 @@ from django.db import connection
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework import status
+import rest_framework
 from rest_framework.permissions import IsAuthenticated
 from django.db.models import Q, Sum, Count, Case, When, Value, F
 from oracle_fbdi_integration.utilities.journal_integration import create_and_upload_journal
@@ -303,37 +304,60 @@ class ListBudgetTransferView(APIView):
         # ====== SECURITY GROUP FILTERING ======
         user = request.user
         
-        # SuperAdmin sees everything
+        # SuperAdmin bypasses all security group checks
+        user_memberships = None
         if user.role == 1:
-            transfers = xx_BudgetTransfer.objects.all()
+            user_approval_groups = None  # None = see all groups
         else:
-            # Get user's security group memberships
+            # Check if user has approval permissions
             from user_management.models import XX_UserGroupMembership
             
-            user_groups = XX_UserGroupMembership.objects.filter(
+            # Get user's security group memberships with approval access
+            # Check custom_abilities or role's default_abilities for 'APPROVE'
+            user_memberships = XX_UserGroupMembership.objects.filter(
                 user=user,
                 is_active=True
-            ).values_list('security_group_id', flat=True)
+            ).prefetch_related('assigned_roles')
             
-            if not user_groups:
-                # User has no security group - return empty queryset
+            user_approval_groups = []
+            for membership in user_memberships:
+                # Check custom_abilities first
+                if membership.custom_abilities and 'TRANSFER' in membership.custom_abilities:
+                    user_approval_groups.append(membership.security_group_id)
+                    continue
+                
+                # Check role's default_abilities
+                for role in membership.assigned_roles.all():
+                    if role.is_active and role.default_abilities and 'TRANSFER' in role.default_abilities:
+                        user_approval_groups.append(membership.security_group_id)
+                        break
+            
+            if not user_approval_groups:
+                # User has no approval access in any security group
+                print(f"DEBUG: User {user.username} (ID: {user.id}) has no TRANSFER permissions")
+                print(f"DEBUG: User memberships: {user_memberships.count()}")
+                for membership in user_memberships:
+                    print(f"  - Group: {membership.security_group.group_name}")
+                    print(f"    Custom abilities: {membership.custom_abilities}")
+                    for role in membership.assigned_roles.all():
+                        print(f"    Role: {role.role.name}, Active: {role.is_active}, Abilities: {role.default_abilities}")
+
                 return Response(
                     {
                         "success": False,
+                        "status":rest_framework.status.HTTP_403_FORBIDDEN,
                         "error": "ACCESS_DENIED",
-                        "message": "You are not a member of any security group. Please contact your administrator to be assigned to a security group.",
-                        "details": "Your account is not assigned to any security group. Contact an administrator for access.",
-                        "results": [],
-                        "count": 0,
-                        "next": None,
-                        "previous": None
+                        "message": "You do not have approval permissions. Please contact your administrator to grant you approval access in a security group.",
+                        "details": "Your account is not assigned to any security group with approval permissions.",
+                        "results": []
+                        
                     },
                     status=status.HTTP_403_FORBIDDEN
                 )
             
             # Filter transactions to only those in user's security groups OR with no security group restriction
             transfers = xx_BudgetTransfer.objects.filter(
-                Q(security_group_id__in=user_groups) | Q(security_group__isnull=True)
+                Q(security_group_id__in=user_approval_groups) | Q(security_group__isnull=True)
             )
         
         # Apply user restriction if not admin
@@ -679,6 +703,7 @@ class ListBudgetTransfer_approvels_View(APIView):
                     {
                         "success": False,
                         "error": "ACCESS_DENIED",
+                        "status":rest_framework.status.HTTP_403_FORBIDDEN,
                         "message": "You do not have approval permissions. Please contact your administrator to grant you approval access in a security group.",
                         "details": "Your account is not assigned to any security group with approval permissions.",
                         "results": []
@@ -947,8 +972,6 @@ class GetBudgetTransferView(APIView):
             return Response(
                 {"message": "Transfer not found."}, status=status.HTTP_404_NOT_FOUND
             )
-
-
 
 
 class UpdateBudgetTransferView(APIView):
@@ -1644,17 +1667,38 @@ class DashboardBudgetTransferView(APIView):
 
             # Get all transfers with minimal data loading
             transfers_queryset = xx_BudgetTransfer.objects.only(
-                "code", "status", "status_level", "request_date", "transaction_date"
+                "code", "status", "status_level", "request_date", "transaction_date","security_group"
             )
-            print(len(transfers_queryset))
-            if request.user.abilities_legacy.count() > 0:
-                transfers_queryset = filter_budget_transfers_all_in_entities(
+            # print(f"Total transfers before filtering: {len(transfers_queryset)}")
+            
+            # Get all users in the same security group(s) as the current user
+            users_in_same_groups = self._get_users_in_same_security_groups(request.user)
+            print(f"Users in same security groups: {[u.username for u in users_in_same_groups]}")
+            
+            # Check if current user has abilities - if yes, filter by all users in same groups
+            # if request.user.abilities_legacy.count() > 0:
+                # Get abilities from all users in the same security groups
+            all_entity_ids = set()
+            for user in users_in_same_groups:
+                user_entity_ids = [
+                    ability.Entity.id
+                    for ability in user.abilities_legacy.all()
+                    if ability.Entity and ability.Type == "edit"
+                ]
+                all_entity_ids.update(user_entity_ids)
+            
+            print(f"Total entity IDs from all group members: {len(all_entity_ids)}")
+            
+            # Apply filtering using the combined entity IDs
+            if all_entity_ids:
+                transfers_queryset = self._filter_by_group_entities(
                     transfers_queryset,
-                    request.user,
-                    "edit",
-                    dashboard_filler_per_project=DashBoard_filler_per_Project,
+                    list(all_entity_ids),
+                    dashboard_filler_per_project=DashBoard_filler_per_Project
                 )
-                print(len(transfers_queryset))
+            print(f"Transfers after group filtering: {len(transfers_queryset)}")
+           
+
 
             if dashboard_type == "normal" or dashboard_type == "all":
                 # Use database aggregations for counting
@@ -1913,10 +1957,106 @@ class DashboardBudgetTransferView(APIView):
                 {"error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR
             )
 
+    def _get_users_in_same_security_groups(self, user):
+        """
+        Get all users who are in the same security group(s) as the given user.
+        Includes the current user.
+        
+        Returns:
+            QuerySet of xx_User objects
+        """
+        # Get all security groups the user belongs to
+        user_group_ids = XX_UserGroupMembership.objects.filter(
+            user=user,
+            is_active=True
+        ).values_list('security_group_id', flat=True)
+        
+        if not user_group_ids:
+            # User not in any groups, return only the user
+            return xx_User.objects.filter(id=user.id)
+        
+        # Get all users in those same security groups
+        users_in_same_groups = xx_User.objects.filter(
+            group_memberships__security_group_id__in=user_group_ids,
+            group_memberships__is_active=True,
+            is_active=True
+        ).distinct()
+        
+        return users_in_same_groups
+
+    def _filter_by_group_entities(self, queryset, entity_ids, dashboard_filler_per_project=None):
+        """
+        Filter budget transfers by entity IDs from all users in the security group.
+        Similar to filter_budget_transfers_all_in_entities but uses provided entity_ids.
+        
+        Args:
+            queryset: QuerySet of xx_BudgetTransfer
+            entity_ids: List of entity IDs to filter by
+            dashboard_filler_per_project: Optional specific project filter
+            
+        Returns:
+            Filtered QuerySet
+        """
+        from account_and_entitys.models import get_entities_with_children
+        from django.db import connection
+        
+        if dashboard_filler_per_project is not None:
+            if int(dashboard_filler_per_project) in entity_ids:
+                entity_ids = [int(dashboard_filler_per_project)]
+        
+        entities = get_entities_with_children(entity_ids)
+        
+        # Collect allowed entity codes and convert to integers
+        raw_entity_codes = [e.entity for e in entities]
+        numeric_entity_codes = []
+        for code in raw_entity_codes:
+            try:
+                numeric_entity_codes.append(int(str(code).strip()))
+            except Exception:
+                continue
+        
+        if not numeric_entity_codes:
+            return queryset.none()
+        
+        # Use raw SQL to filter transfers (same logic as filter_budget_transfers_all_in_entities)
+        try:
+            with connection.cursor() as cursor:
+                placeholders = ",".join(["%s"] * len(numeric_entity_codes))
+                sql = f"""
+                    SELECT bt.transaction_id
+                    FROM XX_BUDGET_TRANSFER_XX bt
+                    WHERE NOT EXISTS (
+                        SELECT 1 
+                        FROM XX_TRANSACTION_TRANSFER_XX tt 
+                        WHERE tt.transaction_id = bt.transaction_id 
+                        AND tt.cost_center_code NOT IN ({placeholders})
+                    )
+                    AND EXISTS (
+                        SELECT 1 
+                        FROM XX_TRANSACTION_TRANSFER_XX tt2 
+                        WHERE tt2.transaction_id = bt.transaction_id
+                    )
+
+                    UNION
+
+                    SELECT bt.transaction_id
+                    FROM XX_BUDGET_TRANSFER_XX bt
+                    WHERE NOT EXISTS (
+                        SELECT 1 
+                        FROM XX_TRANSACTION_TRANSFER_XX tt 
+                        WHERE tt.transaction_id = bt.transaction_id
+                    )
+                """
+                cursor.execute(sql, numeric_entity_codes)
+                allowed_ids = [row[0] for row in cursor.fetchall()]
+            
+            return queryset.filter(transaction_id__in=allowed_ids)
+        except Exception as e:
+            print(f"Error filtering by group entities: {e}")
+            return queryset
+
 
 ### mobile version #####           
-
-
 class ListBudgetTransfer_approvels_MobileView(APIView):
     """List budget transfers with pagination"""
 
@@ -2141,10 +2281,6 @@ class Approval_Status(APIView):
             },
             status=status.HTTP_200_OK,
         )
-
-
-
-
 
 
 class Oracle_Status(APIView):

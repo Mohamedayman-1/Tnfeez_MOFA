@@ -51,6 +51,12 @@ from .views_security_groups import (
     AllSecurityGroupRolesView,
 )
 
+# User Profile imports - Comprehensive user info endpoints
+from .views_user_profile import (
+    UserProfileView,
+    UserProfileSimpleView,
+)
+
 app_name = 'user_management'
 
 urlpatterns = [
@@ -71,6 +77,13 @@ urlpatterns = [
     path("users/update/", UserUpdateView.as_view(), name="user_update"),
     path("users/delete/", UserDeleteView.as_view(), name="user_delete"),
     path("users/level/update", UpdateUserLevelView.as_view(), name="user_delete"),
+    
+    # =========================================================================
+    # User Profile Endpoints - Comprehensive user information
+    # =========================================================================
+    path("profile/", UserProfileView.as_view(), name="user-profile"),
+    path("profile/simple/", UserProfileSimpleView.as_view(), name="user-profile-simple"),
+    
     # User level management endpoints
     path("levels/", UserLevelListView.as_view(), name="user-level-list"),
     path("levels/create/", UserLevelCreateView.as_view(), name="user-level-create"),

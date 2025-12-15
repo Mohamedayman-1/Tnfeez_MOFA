@@ -492,6 +492,7 @@ class TransactionTransferCreateView(APIView):
                     {
                         "success": False,
                         "error": "ACCESS_DENIED",
+                        "status":rest_framework.status.HTTP_403_FORBIDDEN,
                         "message": "You do not have approval permissions. Please contact your administrator to grant you approval access in a security group.",
                         "details": "Your account is not assigned to any security group with approval permissions.",
                         "results": []
@@ -623,7 +624,6 @@ class TransactionTransferCreateView(APIView):
                     return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
 
-
 class TransactionTransferListView(APIView):
     """List transaction transfers for a specific transaction with DYNAMIC SEGMENT support"""
 
@@ -722,6 +722,7 @@ class TransactionTransferListView(APIView):
                 return Response(
                     {
                         "success": False,
+                        "status":rest_framework.status.HTTP_403_FORBIDDEN,
                         "error": "ACCESS_DENIED",
                         "message": "You do not have approval permissions. Please contact your administrator to grant you approval access in a security group.",
                         "details": "Your account is not assigned to any security group with approval permissions.",
@@ -1334,13 +1335,12 @@ class TransactionTransferListView(APIView):
                     "status": status,
                     "access_control": {
                         "access_source": access_source,
-                        "security_group_id": transaction_object.security_group.group_id if transaction_object.security_group else None,
+                        "security_group_id": transaction_object.security_group.id if transaction_object.security_group else None,
                         "security_group_name": transaction_object.security_group.group_name if transaction_object.security_group else None,
                         "is_restricted": transaction_object.security_group is not None
                     }
                 }
             )
-
 
 
 class TransactionTransferDetailView(APIView):
@@ -2125,50 +2125,6 @@ class TransactionTransferExcelUploadView(APIView):
                 },
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR,
             )
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 
 
