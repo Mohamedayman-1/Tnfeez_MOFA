@@ -220,7 +220,7 @@ def get_validation_results(execution_point, context_data=None, datasource_params
             - total_executions (int): Total validation executions
     """
     return execute_workflows_for_point(
-        execution_point=execution_point,
+        execution_point_code=execution_point,
         context_data=context_data,
         datasource_params=datasource_params,
         user=user
