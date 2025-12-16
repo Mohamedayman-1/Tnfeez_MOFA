@@ -241,6 +241,7 @@ class ValidationWorkflowWithStepsSerializer(serializers.ModelSerializer):
     steps = ValidationStepSerializer(many=True, read_only=True)
     initial_step_detail = ValidationStepSerializer(source='initial_step', read_only=True)
     created_by_username = serializers.CharField(source='created_by.username', read_only=True)
+    new_step_id = serializers.SerializerMethodField()
     
     # Write options
     step_ids = serializers.PrimaryKeyRelatedField(
@@ -275,8 +276,17 @@ class ValidationWorkflowWithStepsSerializer(serializers.ModelSerializer):
             'created_by_username',
             'created_at',
             'updated_at',
+            'new_step_id',
         ]
         read_only_fields = ['created_at', 'updated_at']
+    
+    def get_new_step_id(self, obj):
+        """Calculate the next available step ID (max step ID + 1)."""
+        steps = obj.steps.all()
+        if not steps:
+            return 1
+        max_id = max(step.id for step in steps)
+        return max_id + 1
     
     def create(self, validated_data):
         """Create workflow with optional inline steps."""
