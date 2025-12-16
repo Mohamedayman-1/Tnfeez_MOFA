@@ -32,7 +32,7 @@ def _auto_populate_datasource_params(execution_point, context_data, request=None
     
     if not allowed_datasources or allowed_datasources == ['*']:
         # If all datasources allowed or none specified, get all registered datasources
-        allowed_datasources = list(datasource_registry._datasources.keys())
+        allowed_datasources = list(datasource_registry._registry.keys())
     
     auto_params = {}
     
@@ -57,7 +57,7 @@ def _auto_populate_datasource_params(execution_point, context_data, request=None
     
     # For each allowed datasource, populate its parameters
     for datasource_name in allowed_datasources:
-        datasource_info = datasource_registry.get_datasource(datasource_name)
+        datasource_info = datasource_registry.get_metadata(datasource_name)
         
         if not datasource_info:
             continue
