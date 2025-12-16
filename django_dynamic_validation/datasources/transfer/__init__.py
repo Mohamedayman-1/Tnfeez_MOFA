@@ -5,3 +5,4 @@ Contains datasources that provide data about individual transfer lines.
 """
 
 from .transfer_datasources import *
+from .fund_datasources import *

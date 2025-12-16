@@ -1298,11 +1298,65 @@ class TransactionTransferListView(APIView):
                 }
 
             status = {"status": status}
+            # Execute dynamic validation workflows - collect all errors
+            from django_dynamic_validation.views_helpers import get_validation_results
+            from django_dynamic_validation import execution_points
+            from django_dynamic_validation.datasource_params import StandardParams
+            
+            all_validation_errors = []
+            
+            # Validate at transaction level
+            validation_result = get_validation_results(
+                execution_point=execution_points.on_transfer_submit,
+                context_data={StandardParams.TRANSACTION_ID: transaction_id},
+                user=request.user
+            )
+            
+            # Check if transaction-level validation failed
+            if not validation_result.get('all_passed', False):
+                failure_messages = validation_result.get('all_failure_messages', [])
+                for failure in failure_messages:
+                    all_validation_errors.append({
+                        "scope": "transaction",
+                        "transaction_id": transaction_id,
+                        "workflow": failure.get('workflow_name', 'Unknown'),
+                        "step": failure.get('step_name', 'Unknown'),
+                        "message": failure.get('message', 'Validation failed'),
+                        "execution_id": failure.get('execution_id')
+                    })
+            
+            # Validate each transfer line
+            for transfer in transfers:
+                validation_result = get_validation_results(
+                    execution_point=execution_points.on_transfer_line_submit,
+                    context_data={
+                        StandardParams.TRANSACTION_ID: transaction_id,
+                        StandardParams.TRANSFER_ID: transfer.transfer_id
+                    },
+                    user=request.user
+                )
+                
+                # Check if transfer line validation failed
+                if not validation_result.get('all_passed', False):
+                    failure_messages = validation_result.get('all_failure_messages', [])
+                    for failure in failure_messages:
+                        all_validation_errors.append({
+                            "scope": "transfer_line",
+                            "transaction_id": transaction_id,
+                            "transfer_id": transfer.transfer_id,
+                            "workflow": failure.get('workflow_name', 'Unknown'),
+                            "step": failure.get('step_name', 'Unknown'),
+                            "message": failure.get('message', 'Validation failed'),
+                            "execution_id": failure.get('execution_id')
+                        })
+            
             return Response(
                 {
                     "summary": summary, 
-                    "transfers": response_data, 
+                    "transfers": response_data,
                     "status": status,
+                    "validation_errors": all_validation_errors,
+                    "validation_errors_count": len(all_validation_errors),
                     "access_control": {
                         "access_source": access_source,
                         "security_group_id": transaction_object.security_group.id if transaction_object.security_group else None,
@@ -1328,10 +1382,63 @@ class TransactionTransferListView(APIView):
                 
             }
             status = {"status": status}
+            # Execute dynamic validation workflows - collect all errors
+            from django_dynamic_validation.views_helpers import get_validation_results
+            from django_dynamic_validation import execution_points
+            from django_dynamic_validation.datasource_params import StandardParams
+            
+            all_validation_errors = []
+            
+            # Validate at transaction level
+            validation_result = get_validation_results(
+                execution_point=execution_points.on_transfer_submit,
+                context_data={StandardParams.TRANSACTION_ID: transaction_id},
+                user=request.user
+            )
+            
+            # Check if transaction-level validation failed
+            if not validation_result.get('all_passed', False):
+                failure_messages = validation_result.get('all_failure_messages', [])
+                for failure in failure_messages:
+                    all_validation_errors.append({
+                        "scope": "transaction",
+                        "transaction_id": transaction_id,
+                        "workflow": failure.get('workflow_name', 'Unknown'),
+                        "step": failure.get('step_name', 'Unknown'),
+                        "message": failure.get('message', 'Validation failed'),
+                        "execution_id": failure.get('execution_id')
+                    })
+            
+            # Validate each transfer line
+            for transfer in transfers:
+                validation_result = get_validation_results(
+                    execution_point=execution_points.on_transfer_line_submit,
+                    context_data={
+                        StandardParams.TRANSACTION_ID: transaction_id,
+                        StandardParams.TRANSFER_ID: transfer.transfer_id
+                    },
+                    user=request.user
+                )
+                
+                # Check if transfer line validation failed
+                if not validation_result.get('all_passed', False):
+                    failure_messages = validation_result.get('all_failure_messages', [])
+                    for failure in failure_messages:
+                        all_validation_errors.append({
+                            "scope": "transfer_line",
+                            "transaction_id": transaction_id,
+                            "transfer_id": transfer.transfer_id,
+                            "workflow": failure.get('workflow_name', 'Unknown'),
+                            "step": failure.get('step_name', 'Unknown'),
+                            "message": failure.get('message', 'Validation failed'),
+                            "execution_id": failure.get('execution_id')
+                        })
             return Response(
                 {
                     "summary": summary, 
                     "transfers": response_data, 
+                    "validation_errors": all_validation_errors,
+                    "validation_errors_count": len(all_validation_errors),
                     "status": status,
                     "access_control": {
                         "access_source": access_source,
@@ -1452,33 +1559,69 @@ class transcationtransferSubmit(APIView):
                 )
                 code = xx_BudgetTransfer.objects.get(transaction_id=transaction_id).code
 
-                # Execute dynamic validation workflows
-                from django_dynamic_validation.views_helpers import execute_and_validate
+                # Execute dynamic validation workflows - collect all errors
+                from django_dynamic_validation.views_helpers import get_validation_results
                 from django_dynamic_validation import execution_points
                 from django_dynamic_validation.datasource_params import StandardParams
- 
-                validation_error = execute_and_validate(
+                
+                all_validation_errors = []
+                
+                # Validate at transaction level
+                validation_result = get_validation_results(
                     execution_point=execution_points.on_transfer_submit,
                     context_data={StandardParams.TRANSACTION_ID: transaction_id},
-                    request=request,
                     user=request.user
                 )
-                if validation_error:
-                    return validation_error
-               
+                
+                # Check if transaction-level validation failed
+                if not validation_result.get('all_passed', False):
+                    failure_messages = validation_result.get('all_failure_messages', [])
+                    for failure in failure_messages:
+                        all_validation_errors.append({
+                            "scope": "transaction",
+                            "transaction_id": transaction_id,
+                            "workflow": failure.get('workflow_name', 'Unknown'),
+                            "step": failure.get('step_name', 'Unknown'),
+                            "message": failure.get('message', 'Validation failed'),
+                            "execution_id": failure.get('execution_id')
+                        })
+                
+                # Validate each transfer line
                 for transfer in transfers:
-                    validation_error = execute_and_validate(
+                    validation_result = get_validation_results(
                         execution_point=execution_points.on_transfer_line_submit,
                         context_data={
                             StandardParams.TRANSACTION_ID: transaction_id,
                             StandardParams.TRANSFER_ID: transfer.transfer_id
                         },
-                        request=request,
                         user=request.user
                     )
-                    if validation_error:
-                        return validation_error
-               
+                    
+                    # Check if transfer line validation failed
+                    if not validation_result.get('all_passed', False):
+                        failure_messages = validation_result.get('all_failure_messages', [])
+                        for failure in failure_messages:
+                            all_validation_errors.append({
+                                "scope": "transfer_line",
+                                "transaction_id": transaction_id,
+                                "transfer_id": transfer.transfer_id,
+                                "workflow": failure.get('workflow_name', 'Unknown'),
+                                "step": failure.get('step_name', 'Unknown'),
+                                "message": failure.get('message', 'Validation failed'),
+                                "execution_id": failure.get('execution_id')
+                            })
+                
+                # If there are any validation errors, return them all at once
+                if all_validation_errors:
+                    return Response(
+                        {
+                            "success": False,
+                            "error": "VALIDATION_FAILED",
+                            "message": f"Found {len(all_validation_errors)} validation error(s)",
+                            "validation_errors": all_validation_errors
+                        },
+                        status=rest_framework.status.HTTP_400_BAD_REQUEST
+                    )
 
                 print(f"Transfers found: {transfers.count()}")
                 if len(transfers) < 2 and code[0:3] == "FAR":

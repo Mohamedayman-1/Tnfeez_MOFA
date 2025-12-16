@@ -32,6 +32,7 @@ execution_point_registry.register(
         'Transaction_Total_From',
         'Transaction_Total_To',
         'Transaction_Type',
+        'Transaction_CONTROL_BUDGET_NAME',
         'User_Name',
         'User_Role',
         'User_Level'
@@ -64,9 +65,14 @@ execution_point_registry.register(
         'Transaction_Total_From',
         'Transaction_Total_To',
         'Transaction_Type',
+        'Transaction_CONTROL_BUDGET_NAME',
         # Transfer line amounts
         'Transaction_Line_TO',
         'Transaction_Line_FROM',
+        'SEGMENT_FUND_AVAILABLE_CASH',
+        'SEGMENT_FUND_AVAILABLE_COST',
+        'SEGMENT_TOTAL_BUDGET_COST',
+        'SEGMENT_TOTAL_BUDGET_CASH',
         # User context
         'User_Name',
         'User_Role',

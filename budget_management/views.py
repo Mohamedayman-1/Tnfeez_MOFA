@@ -1,6 +1,6 @@
 from datetime import time
 from decimal import Decimal
-from chromadb import logger
+import logging
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework import status
@@ -70,6 +70,9 @@ from rest_framework.permissions import IsAuthenticated
 
 from budget_management.models import xx_BudgetTransfer
 from budget_management.serializers import BudgetTransferSerializer
+
+# Initialize logger
+logger = logging.getLogger(__name__)
 
 
 class TransferPagination(PageNumberPagination):

@@ -72,6 +72,19 @@ def get_transaction_type(transaction_id):
     from budget_management.models import xx_BudgetTransfer
     transaction = xx_BudgetTransfer.objects.filter(transaction_id=transaction_id).first()
     return transaction.type if transaction else ''
+# =================================================================================
+Transaction_CONTROL_BUDGET_NAME = 'Transaction_CONTROL_BUDGET_NAME'
+@datasource_registry.register(
+    name=Transaction_CONTROL_BUDGET_NAME,
+    parameters=[StandardParams.TRANSACTION_ID],
+    return_type="string",
+    description="Control budget name of a given transaction ('سيولة', 'تكاليف')"
+)
+def get_transaction_control_budget_name(transaction_id):
+    """Get the control budget name of a budget transfer transaction."""
+    from budget_management.models import xx_BudgetTransfer
+    transaction = xx_BudgetTransfer.objects.filter(transaction_id=transaction_id).first()
+    return transaction.control_budget if transaction else ''
 
 
 # =================================================================================
