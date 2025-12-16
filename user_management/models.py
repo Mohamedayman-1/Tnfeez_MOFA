@@ -24,9 +24,9 @@ class xx_UserManager(BaseUserManager):
                 default_level = xx_UserLevel.objects.order_by('level_order').first()
                 if default_level:
                     user.user_level = default_level
-                else:
+                # else:
                     # No user levels exist yet, log a warning
-                    print("Warning: No user levels found in the system. User created without a level.")
+                    # print("Warning: No user levels found in the system. User created without a level.")
             except Exception as e:
                 print(f"Error assigning default user level: {e}")
 

@@ -529,6 +529,7 @@ class ExcelUploadSerializer(serializers.Serializer):
 
 class ValidationStepCreateSerializer(serializers.ModelSerializer):
     """Enhanced serializer for creating ValidationStep with validation."""
+    id = serializers.IntegerField(required=False, help_text="Step ID (for bulk operations with temp IDs)")
     workflow_id = serializers.IntegerField(write_only=True, required=False, help_text="ID of workflow to auto-assign this step to")
     
     class Meta:
@@ -550,7 +551,24 @@ class ValidationStepCreateSerializer(serializers.ModelSerializer):
             'created_by',
             'workflow_id',
         ]
-        read_only_fields = ['id', 'created_by']
+        extra_kwargs = {
+            'id': {'read_only': False, 'required': False},
+            'created_by': {'read_only': True},
+            # Make fields optional for bulk operations (existing steps only need ID)
+            'left_expression': {'required': False},
+            'operation': {'required': False},
+            'right_expression': {'required': False},
+            'if_true_action': {'required': False},
+            'if_false_action': {'required': False},
+        }
+    
+    def create(self, validated_data):
+        """Create step, removing workflow_id and id before saving."""
+        # Remove workflow_id as it's not a model field (handled in views)
+        validated_data.pop('workflow_id', None)
+        # Remove id as it's used for temp ID mapping only (not for forcing DB ID)
+        validated_data.pop('id', None)
+        return super().create(validated_data)
     
     def to_internal_value(self, data):
         """Convert frontend format {{Variable}} to database format datasource:Variable"""
@@ -578,6 +596,7 @@ class ValidationStepCreateSerializer(serializers.ModelSerializer):
 class BulkStepCreateSerializer(serializers.Serializer):
     """Serializer for bulk creating multiple validation steps."""
     workflow_id = serializers.IntegerField(required=True, help_text="ID of workflow to assign all steps to")
+    new_step_id = serializers.IntegerField(required=True, help_text="Threshold ID - IDs >= this value are new steps to create")
     steps = ValidationStepCreateSerializer(many=True, help_text="Array of step data objects")
 
 
@@ -612,6 +631,7 @@ class StepUpdateDataSerializer(serializers.Serializer):
 
 class BulkStepUpdateSerializer(serializers.Serializer):
     """Serializer for bulk updating multiple validation steps."""
+    new_step_id = serializers.IntegerField(required=True, help_text="Threshold ID - IDs >= this value are new steps to create")
     updates = StepUpdateDataSerializer(many=True, help_text="Array of step updates with step_id and fields to update")
     
     def validate_operation(self, value):

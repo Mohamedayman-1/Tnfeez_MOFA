@@ -80,6 +80,48 @@ class ValidationStepViewSet(viewsets.ModelViewSet):
         if workflow_id:
             self._update_workflow_steps(workflow_id, step)
     
+    def _remap_step_references(self, steps, id_mapping, new_step_id_threshold):
+        """
+        Remap temporary step IDs to real database IDs in action_data fields.
+        
+        This handles the case where steps reference other steps that were just created
+        with temporary IDs (>= new_step_id_threshold).
+        
+        Args:
+            steps: List of ValidationStep objects to update
+            id_mapping: Dict mapping temp_id -> real_db_id
+            new_step_id_threshold: IDs >= this value are considered temporary
+        """
+        if not id_mapping:
+            return
+        
+        for step in steps:
+            updated = False
+            
+            # Check if_true_action_data
+            if step.if_true_action_data and isinstance(step.if_true_action_data, dict):
+                next_step_id = step.if_true_action_data.get('next_step_id')
+                if next_step_id and next_step_id >= new_step_id_threshold:
+                    # This references a temporary ID, remap it
+                    real_id = id_mapping.get(next_step_id)
+                    if real_id:
+                        step.if_true_action_data['next_step_id'] = real_id
+                        updated = True
+            
+            # Check if_false_action_data
+            if step.if_false_action_data and isinstance(step.if_false_action_data, dict):
+                next_step_id = step.if_false_action_data.get('next_step_id')
+                if next_step_id and next_step_id >= new_step_id_threshold:
+                    # This references a temporary ID, remap it
+                    real_id = id_mapping.get(next_step_id)
+                    if real_id:
+                        step.if_false_action_data['next_step_id'] = real_id
+                        updated = True
+            
+            # Save if we made any updates
+            if updated:
+                step.save()
+    
     def _update_workflow_steps(self, workflow_id, step):
         """Update workflow's step list based on step order."""
         from .models import ValidationWorkflow
@@ -119,34 +161,48 @@ class ValidationStepViewSet(viewsets.ModelViewSet):
     @action(detail=False, methods=['post'])
     def bulk_create(self, request):
         """
-        Create multiple validation steps at once.
+        Create multiple validation steps at once with temporary ID mapping.
         
         Request body:
             {
                 "workflow_id": 1,
+                "new_step_id": 5,  // Threshold: IDs >= 5 are new steps
                 "steps": [
                     {
+                        "id": 3,  // Existing step
                         "name": "Step 1",
-                        "order": 1,
-                        "left_expression": "datasource:amount",
-                        "operation": ">=",
-                        "right_expression": "100",
-                        "if_true_action": "proceed_to_step",
-                        "if_false_action": "complete_failure"
+                        ...
                     },
-                    {...}
+                    {
+                        "id": 5,  // New step (>= new_step_id)
+                        "name": "Step 2",
+                        "if_true_action": "proceed_to_step_by_id",
+                        "if_true_action_data": {"next_step_id": 6}  // References another new step
+                    },
+                    {
+                        "id": 6,  // New step
+                        "name": "Step 3",
+                        ...
+                    }
                 ]
             }
+        
+        Logic:
+        - IDs >= new_step_id are NEW steps (create them)
+        - IDs < new_step_id are EXISTING steps (update/link them)
+        - After creating new steps, map temp IDs to real DB IDs
+        - Update all next_step_id references in action_data
         
         Returns:
             {
                 "success": true,
                 "created_count": 2,
                 "steps": [...],
+                "id_mapping": {5: 10, 6: 11},  // temp_id -> real_db_id
                 "workflow": {...}
             }
         """
-        from .serializers import BulkStepCreateSerializer
+        from .serializers import BulkStepCreateSerializer, ValidationStepCreateSerializer
         from .models import ValidationWorkflow
         from rest_framework.exceptions import ValidationError
         
@@ -154,6 +210,7 @@ class ValidationStepViewSet(viewsets.ModelViewSet):
         serializer.is_valid(raise_exception=True)
         
         workflow_id = serializer.validated_data['workflow_id']
+        new_step_id = serializer.validated_data['new_step_id']
         steps_data = serializer.validated_data['steps']
         
         # Validate workflow exists
@@ -162,19 +219,44 @@ class ValidationStepViewSet(viewsets.ModelViewSet):
         except ValidationWorkflow.DoesNotExist:
             raise ValidationError({"workflow_id": f"Workflow with id {workflow_id} does not exist"})
         
-        # Create all steps
+        # Separate new steps (id >= new_step_id) from existing steps
+        new_steps_data = []
+        existing_step_ids = []
+        
+        for step_data in steps_data:
+            step_id = step_data.get('id')
+            if step_id and step_id >= new_step_id:
+                # This is a NEW step to create
+                new_steps_data.append(step_data)
+            elif step_id:
+                # This is an EXISTING step
+                existing_step_ids.append(step_id)
+        
+        # Build ID mapping: temp_id -> real_db_id
+        id_mapping = {}
         created_steps = []
         errors = []
         
-        for idx, step_data in enumerate(steps_data):
+        # Create new steps
+        for idx, step_data in enumerate(new_steps_data):
             try:
-                step_serializer = ValidationStepCreateSerializer(data=step_data)
+                # Extract temp_id (used for mapping only, not for DB)
+                temp_id = step_data.get('id')
+                
+                # Make a copy to avoid modifying original
+                step_data_copy = step_data.copy()
+                
+                step_serializer = ValidationStepCreateSerializer(data=step_data_copy)
                 step_serializer.is_valid(raise_exception=True)
                 
                 if request.user and request.user.is_authenticated:
                     step = step_serializer.save(created_by=request.user)
                 else:
                     step = step_serializer.save()
+                
+                # Map temp ID to real database ID
+                if temp_id:
+                    id_mapping[temp_id] = step.id
                 
                 # Auto-assign to workflow
                 self._update_workflow_steps(workflow_id, step)
@@ -183,17 +265,29 @@ class ValidationStepViewSet(viewsets.ModelViewSet):
             except Exception as e:
                 errors.append({
                     "step_index": idx,
+                    "temp_id": temp_id,
                     "step_name": step_data.get('name', 'Unknown'),
                     "error": str(e)
                 })
+        
+        # Now update all steps' action_data to replace temp IDs with real IDs
+        self._remap_step_references(created_steps, id_mapping, new_step_id)
+        
+        # Link existing steps to workflow
+        if existing_step_ids:
+            existing_steps = ValidationStep.objects.filter(id__in=existing_step_ids)
+            for step in existing_steps:
+                self._update_workflow_steps(workflow_id, step)
         
         # Refresh workflow to get updated steps
         workflow.refresh_from_db()
         
         response_data = {
-            'success': len(created_steps) > 0,
+            'success': len(created_steps) > 0 or len(existing_step_ids) > 0,
             'created_count': len(created_steps),
+            'linked_existing_count': len(existing_step_ids),
             'steps': ValidationStepSerializer(created_steps, many=True).data,
+            'id_mapping': id_mapping,
             'workflow': {
                 'id': workflow.id,
                 'name': workflow.name,
@@ -211,42 +305,125 @@ class ValidationStepViewSet(viewsets.ModelViewSet):
     @action(detail=False, methods=['put', 'patch'])
     def bulk_update(self, request):
         """
-        Update multiple validation steps at once.
+        Update multiple validation steps at once with temporary ID mapping.
         
         Request body:
             {
+                "new_step_id": 5,  // Threshold: IDs >= 5 are new steps to create
                 "updates": [
                     {
-                        "step_id": 5,
+                        "step_id": 3,  // Existing step (< new_step_id)
                         "name": "Updated Name",
                         "order": 2,
                         "workflow_id": 1
                     },
                     {
-                        "step_id": 6,
-                        "order": 3
+                        "step_id": 5,  // New step (>= new_step_id)
+                        "name": "New Step",
+                        "order": 3,
+                        "if_true_action": "proceed_to_step_by_id",
+                        "if_true_action_data": {"next_step_id": 6},
+                        "workflow_id": 1
+                    },
+                    {
+                        "step_id": 6,  // New step
+                        "name": "Another New Step",
+                        "order": 4,
+                        "workflow_id": 1
                     }
                 ]
             }
         
+        Logic:
+        - step_id >= new_step_id: CREATE new step
+        - step_id < new_step_id: UPDATE existing step
+        - After creating, map temp IDs to real DB IDs
+        - Update all next_step_id references in action_data
+        
         Returns:
             {
                 "success": true,
-                "updated_count": 2,
-                "steps": [...]
+                "updated_count": 1,
+                "created_count": 2,
+                "steps": [...],
+                "id_mapping": {5: 10, 6: 11}
             }
         """
-        from .serializers import BulkStepUpdateSerializer
+        from .serializers import BulkStepUpdateSerializer, ValidationStepCreateSerializer
         
         serializer = BulkStepUpdateSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         
+        new_step_id = serializer.validated_data['new_step_id']
         updates_data = serializer.validated_data['updates']
         
+        # Separate new steps from existing steps
+        new_steps_data = []
+        update_steps_data = []
+        
+        for update_item in updates_data:
+            step_id = update_item.get('step_id')
+            if step_id and step_id >= new_step_id:
+                # This is a NEW step to create
+                new_steps_data.append(update_item)
+            else:
+                # This is an EXISTING step to update
+                update_steps_data.append(update_item)
+        
+        # Build ID mapping for new steps
+        id_mapping = {}
+        created_steps = []
         updated_steps = []
         errors = []
         
-        for update_item in updates_data:
+        # CREATE new steps
+        for new_step_data in new_steps_data:
+            temp_id = new_step_data.pop('step_id')
+            workflow_id = new_step_data.pop('workflow_id', None)
+            
+            try:
+                # Prepare data for creation
+                create_data = {
+                    'name': new_step_data.get('name'),
+                    'description': new_step_data.get('description', ''),
+                    'order': new_step_data.get('order', 1),
+                    'left_expression': new_step_data.get('left_expression', ''),
+                    'operation': new_step_data.get('operation', '=='),
+                    'right_expression': new_step_data.get('right_expression', ''),
+                    'if_true_action': new_step_data.get('if_true_action', 'complete_success'),
+                    'if_true_action_data': new_step_data.get('if_true_action_data', {}),
+                    'if_false_action': new_step_data.get('if_false_action', 'complete_failure'),
+                    'if_false_action_data': new_step_data.get('if_false_action_data', {}),
+                    'failure_message': new_step_data.get('failure_message', ''),
+                    'is_active': new_step_data.get('is_active', True)
+                }
+                
+                step_serializer = ValidationStepCreateSerializer(data=create_data)
+                step_serializer.is_valid(raise_exception=True)
+                
+                if request.user and request.user.is_authenticated:
+                    step = step_serializer.save(created_by=request.user)
+                else:
+                    step = step_serializer.save()
+                
+                # Map temp ID to real database ID
+                id_mapping[temp_id] = step.id
+                
+                # Handle workflow assignment if provided
+                if workflow_id:
+                    self._update_workflow_steps(workflow_id, step)
+                
+                created_steps.append(step)
+                
+            except Exception as e:
+                errors.append({
+                    "temp_id": temp_id,
+                    "error": str(e),
+                    "action": "create"
+                })
+        
+        # UPDATE existing steps
+        for update_item in update_steps_data:
             step_id = update_item.pop('step_id')
             workflow_id = update_item.pop('workflow_id', None)
             
@@ -268,18 +445,26 @@ class ValidationStepViewSet(viewsets.ModelViewSet):
             except ValidationStep.DoesNotExist:
                 errors.append({
                     "step_id": step_id,
-                    "error": f"Step with id {step_id} does not exist"
+                    "error": f"Step with id {step_id} does not exist",
+                    "action": "update"
                 })
             except Exception as e:
                 errors.append({
                     "step_id": step_id,
-                    "error": str(e)
+                    "error": str(e),
+                    "action": "update"
                 })
         
+        # Remap all step references for both created and updated steps
+        all_affected_steps = created_steps + updated_steps
+        self._remap_step_references(all_affected_steps, id_mapping, new_step_id)
+        
         response_data = {
-            'success': len(updated_steps) > 0,
+            'success': len(created_steps) > 0 or len(updated_steps) > 0,
+            'created_count': len(created_steps),
             'updated_count': len(updated_steps),
-            'steps': ValidationStepSerializer(updated_steps, many=True).data
+            'steps': ValidationStepSerializer(all_affected_steps, many=True).data,
+            'id_mapping': id_mapping
         }
         
         if errors:
