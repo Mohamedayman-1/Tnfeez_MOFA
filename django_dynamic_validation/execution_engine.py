@@ -515,24 +515,41 @@ class ValidationExecutionEngine:
             Sanitized context dictionary safe for JSON serialization
         """
         from django.db import models
+        from rest_framework.request import Request as DRFRequest
+        import json
         
         sanitized = {}
         for key, value in context.items():
+            # Skip Django/DRF Request objects - they can't be serialized
+            if isinstance(value, DRFRequest) or hasattr(value, 'META'):
+                # Store basic request info instead
+                sanitized[key] = f"<Request: {getattr(value, 'method', 'UNKNOWN')} {getattr(value, 'path', '/')}>"
+                continue
             # Convert Django model instances to their primary key
-            if isinstance(value, models.Model):
+            elif isinstance(value, models.Model):
                 sanitized[key] = value.pk
             # Recursively sanitize nested dictionaries
             elif isinstance(value, dict):
                 sanitized[key] = self._sanitize_context(value)
             # Handle lists/tuples
             elif isinstance(value, (list, tuple)):
-                sanitized[key] = [
-                    item.pk if isinstance(item, models.Model) else item
-                    for item in value
-                ]
-            # Keep JSON-serializable types as-is
+                sanitized_list = []
+                for item in value:
+                    if isinstance(item, models.Model):
+                        sanitized_list.append(item.pk)
+                    elif isinstance(item, DRFRequest) or hasattr(item, 'META'):
+                        sanitized_list.append(f"<Request: {getattr(item, 'method', 'UNKNOWN')} {getattr(item, 'path', '/')}>") 
+                    else:
+                        sanitized_list.append(item)
+                sanitized[key] = sanitized_list
+            # Test if value is JSON serializable
             else:
-                sanitized[key] = value
+                try:
+                    json.dumps(value)
+                    sanitized[key] = value
+                except (TypeError, ValueError):
+                    # Convert non-serializable objects to string representation
+                    sanitized[key] = str(value)
         
         return sanitized
     
