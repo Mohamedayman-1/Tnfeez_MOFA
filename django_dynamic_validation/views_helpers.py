@@ -185,7 +185,7 @@ def execute_and_validate(execution_point, context_data=None, datasource_params=N
     return None
 
 
-def get_validation_results(execution_point, context_data=None, datasource_params=None, user=None):
+def get_validation_results(execution_point, context_data=None, datasource_params=None, user=None, request=None):
     """
     Execute validation workflows and return the raw results dict.
     
@@ -219,6 +219,13 @@ def get_validation_results(execution_point, context_data=None, datasource_params
             - workflows_executed (int): Number of workflows that ran
             - total_executions (int): Total validation executions
     """
+     # Auto-populate datasource_params if not provided
+    if datasource_params is None and context_data:
+        datasource_params = _auto_populate_datasource_params(
+            execution_point=execution_point,
+            context_data=context_data,
+            request=request
+        )
     return execute_workflows_for_point(
         execution_point_code=execution_point,
         context_data=context_data,

@@ -1309,7 +1309,8 @@ class TransactionTransferListView(APIView):
             validation_result = get_validation_results(
                 execution_point=execution_points.on_transfer_submit,
                 context_data={StandardParams.TRANSACTION_ID: transaction_id},
-                user=request.user
+                user=request.user,
+                request=request
             )
             
             # Check if transaction-level validation failed
@@ -1333,7 +1334,8 @@ class TransactionTransferListView(APIView):
                         StandardParams.TRANSACTION_ID: transaction_id,
                         StandardParams.TRANSFER_ID: transfer.transfer_id
                     },
-                    user=request.user
+                    user=request.user,
+                    request=request
                 )
                 
                 # Check if transfer line validation failed
@@ -1393,7 +1395,8 @@ class TransactionTransferListView(APIView):
             validation_result = get_validation_results(
                 execution_point=execution_points.on_transfer_submit,
                 context_data={StandardParams.TRANSACTION_ID: transaction_id},
-                user=request.user
+                user=request.user,
+                request=request
             )
             
             # Check if transaction-level validation failed
@@ -1417,7 +1420,8 @@ class TransactionTransferListView(APIView):
                         StandardParams.TRANSACTION_ID: transaction_id,
                         StandardParams.TRANSFER_ID: transfer.transfer_id
                     },
-                    user=request.user
+                    user=request.user,
+                    request=request
                 )
                 
                 # Check if transfer line validation failed
@@ -1570,7 +1574,8 @@ class transcationtransferSubmit(APIView):
                 validation_result = get_validation_results(
                     execution_point=execution_points.on_transfer_submit,
                     context_data={StandardParams.TRANSACTION_ID: transaction_id},
-                    user=request.user
+                    user=request.user,
+                    request=request
                 )
                 
                 # Check if transaction-level validation failed
@@ -1594,7 +1599,8 @@ class transcationtransferSubmit(APIView):
                             StandardParams.TRANSACTION_ID: transaction_id,
                             StandardParams.TRANSFER_ID: transfer.transfer_id
                         },
-                        user=request.user
+                        user=request.user,
+                        request=request
                     )
                     
                     # Check if transfer line validation failed
