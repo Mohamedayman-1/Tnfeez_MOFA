@@ -238,6 +238,8 @@ class ValidationStep(models.Model):
     name = models.CharField(max_length=255)
     description = models.TextField(blank=True, null=True)
     order = models.IntegerField(default=0)
+    x = models.FloatField(help_text="X coordinate for frontend positioning", null=True, blank=True)
+    y = models.FloatField(help_text="Y coordinate for frontend positioning", null=True, blank=True)
     is_active = models.BooleanField(default=True)
     
     # Custom error message for users when validation fails
