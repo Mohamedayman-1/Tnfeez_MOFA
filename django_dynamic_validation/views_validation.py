@@ -387,6 +387,8 @@ class ValidationStepViewSet(viewsets.ModelViewSet):
                     'name': new_step_data.get('name'),
                     'description': new_step_data.get('description', ''),
                     'order': new_step_data.get('order', 1),
+                    'x': new_step_data.get('x', 0),
+                    'y': new_step_data.get('y', 0),
                     'left_expression': new_step_data.get('left_expression', ''),
                     'operation': new_step_data.get('operation', '=='),
                     'right_expression': new_step_data.get('right_expression', ''),

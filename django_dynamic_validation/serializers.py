@@ -626,6 +626,8 @@ class StepUpdateDataSerializer(serializers.Serializer):
     name = serializers.CharField(required=False)
     description = serializers.CharField(required=False, allow_blank=True)
     order = serializers.IntegerField(required=False)
+    x = serializers.FloatField(required=False)
+    y = serializers.FloatField(required=False)
     left_expression = serializers.CharField(required=False)
     operation = serializers.CharField(required=False)
     right_expression = serializers.CharField(required=False)
