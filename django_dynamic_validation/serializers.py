@@ -67,8 +67,17 @@ def convert_frontend_to_db(expression):
     """
     if not expression:
         return expression
+    
+    # Strip any stray closing braces at the end (cleanup malformed data)
+    expression = expression.rstrip('}')
+    
     # Replace {{Variable}} with datasource:Variable
-    return re.sub(r'\{\{(\w+)\}\}', r'datasource:\1', expression)
+    result = re.sub(r'\{\{(\w+)\}\}', r'datasource:\1', expression)
+    
+    # Clean up any remaining unmatched braces
+    result = result.replace('{{', '').replace('}}', '')
+    
+    return result
 
 
 def convert_db_to_frontend(expression):
@@ -78,8 +87,12 @@ def convert_db_to_frontend(expression):
     """
     if not expression:
         return expression
+    
+    # First, strip any existing {{ }} formatting (idempotent)
+    cleaned = expression.replace('{{', '').replace('}}', '')
+    
     # Replace datasource:Variable with {{Variable}}
-    return re.sub(r'datasource:(\w+)', r'{{\1}}', expression)
+    return re.sub(r'datasource:(\w+)', r'{{\1}}', cleaned)
 
 
 class ValidationStepSerializer(serializers.ModelSerializer):
