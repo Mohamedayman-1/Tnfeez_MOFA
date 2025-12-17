@@ -1670,36 +1670,39 @@ class DashboardBudgetTransferView(APIView):
 
             # Get all transfers with minimal data loading
             transfers_queryset = xx_BudgetTransfer.objects.only(
-                "code", "status", "status_level", "request_date", "transaction_date","security_group"
+                "code", "status", "status_level", "request_date", "transaction_date","security_group", "requested_by"
             )
-            # print(f"Total transfers before filtering: {len(transfers_queryset)}")
             
-            # Get all users in the same security group(s) as the current user
-            users_in_same_groups = self._get_users_in_same_security_groups(request.user)
-            print(f"Users in same security groups: {[u.username for u in users_in_same_groups]}")
+            # PHASE 6: Filter by security group membership
+            # Show transfers where user's security group matches transfer's security group
+            # This allows:
+            # 1. Creators (planners) - see all transfers from their group
+            # 2. Approvers (managers) - see all transfers they need to approve in their group
+            # 3. SuperAdmin - sees all transfers
             
-            # Check if current user has abilities - if yes, filter by all users in same groups
-            # if request.user.abilities_legacy.count() > 0:
-                # Get abilities from all users in the same security groups
-            all_entity_ids = set()
-            for user in users_in_same_groups:
-                user_entity_ids = [
-                    ability.Entity.id
-                    for ability in user.abilities_legacy.all()
-                    if ability.Entity and ability.Type == "edit"
-                ]
-                all_entity_ids.update(user_entity_ids)
+            # Check if user is SuperAdmin (role=1)
+            if request.user.role == 1:
+                # SuperAdmin sees all transfers
+                print(f"User {request.user.username} is SuperAdmin - showing all transfers")
+            else:
+                # Get all security groups user belongs to
+                user_security_group_ids = XX_UserGroupMembership.objects.filter(
+                    user=request.user,
+                    is_active=True
+                ).values_list('security_group_id', flat=True)
+                
+                if user_security_group_ids:
+                    # Show all transfers from user's security groups
+                    transfers_queryset = transfers_queryset.filter(
+                        security_group_id__in=user_security_group_ids
+                    )
+                    print(f"User {request.user.username} sees transfers from {len(user_security_group_ids)} security group(s)")
+                else:
+                    # User not in any security group - no transfers visible
+                    transfers_queryset = transfers_queryset.none()
+                    print(f"User {request.user.username} has no security group membership")
             
-            print(f"Total entity IDs from all group members: {len(all_entity_ids)}")
-            
-            # Apply filtering using the combined entity IDs
-            if all_entity_ids:
-                transfers_queryset = self._filter_by_group_entities(
-                    transfers_queryset,
-                    list(all_entity_ids),
-                    dashboard_filler_per_project=DashBoard_filler_per_Project
-                )
-            print(f"Transfers after group filtering: {len(transfers_queryset)}")
+            print(f"Transfers after filtering: {transfers_queryset.count()}")
            
 
 

@@ -280,10 +280,12 @@ class ApprovalManager:
         # required_role is FK to XX_SecurityGroupRole (group-specific role assignment)
         if st.required_role:
             # Get users who have this role assigned in their security group membership
+            # FIXED: Use assigned_roles=st.required_role instead of assigned_roles__in=[st.required_role]
+            # ManyToMany filter works directly with the FK object
             users_with_role_ids = list(XX_UserGroupMembership.objects.filter(
                 security_group=security_group,
                 is_active=True,
-                assigned_roles__in=[st.required_role]
+                assigned_roles=st.required_role  # FIXED: Direct FK lookup
             ).values_list('user_id', flat=True))
             
             print(f"Users with required role {st.required_role}: {users_with_role_ids}")

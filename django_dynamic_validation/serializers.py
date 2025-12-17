@@ -281,11 +281,12 @@ class ValidationWorkflowWithStepsSerializer(serializers.ModelSerializer):
         read_only_fields = ['created_at', 'updated_at']
     
     def get_new_step_id(self, obj):
-        """Calculate the next available step ID (max step ID + 1)."""
-        steps = obj.steps.all()
-        if not steps:
+        """Calculate the next available step ID (max step ID + 1) from ALL steps in database."""
+        from .models import ValidationStep
+        from django.db import models
+        max_id = ValidationStep.objects.aggregate(models.Max('id'))['id__max']
+        if max_id is None:
             return 1
-        max_id = max(step.id for step in steps)
         return max_id + 1
     
     def create(self, validated_data):
