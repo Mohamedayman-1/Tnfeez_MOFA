@@ -259,41 +259,46 @@ class ApprovalManager:
         
         security_group = budget_transfer.security_group
         
-        # Get active members of the security group
-        member_user_ids = XX_UserGroupMembership.objects.filter(
-            security_group=security_group,
-            is_active=True
-        ).values_list('user_id', flat=True)
+        # Filter by required role if specified
+        # required_role is FK to XX_SecurityGroupRole (group-specific role assignment)
+        if st.required_role:
+            # CRITICAL FIX: Use the role's security_group, NOT the transaction's security_group
+            # This allows cross-group workflows (e.g., Finance Team transaction -> Fusion Team approvers)
+            role_security_group = st.required_role.security_group
+            
+            print(f"\n=== DEBUG _create_assignments ===")
+            print(f"Stage: {st.name} (ID: {st.id})")
+            print(f"Transaction Security Group: {security_group.group_name}")
+            print(f"Required Role: {st.required_role}")
+            print(f"Role Security Group: {role_security_group.group_name}")
+            
+            # Get active members who have this specific role in the role's security group
+            member_user_ids = XX_UserGroupMembership.objects.filter(
+                security_group=role_security_group,  # Use role's security group
+                is_active=True,
+                assigned_roles=st.required_role  # Direct FK lookup
+            ).values_list('user_id', flat=True)
+            
+            print(f"Users with required role in {role_security_group.group_name}: {list(member_user_ids)}")
+            
+        else:
+            # No required role - use transaction's security group members
+            print(f"\n=== DEBUG _create_assignments ===")
+            print(f"Stage: {st.name} (ID: {st.id})")
+            print(f"Security Group: {security_group.group_name}")
+            print(f"Required Role: None - using all active members")
+            
+            member_user_ids = XX_UserGroupMembership.objects.filter(
+                security_group=security_group,
+                is_active=True
+            ).values_list('user_id', flat=True)
         
         qs = xx_User.objects.filter(
             id__in=member_user_ids,
             is_active=True
         )
         
-        print(f"\n=== DEBUG _create_assignments ===")
-        print(f"Stage: {st.name} (ID: {st.id})")
-        print(f"Security Group: {security_group.group_name}")
-        print(f"Required Role: {st.required_role}")
-        print(f"Total active members in group: {qs.count()}")
-        
-        # Filter by required role if specified
-        # required_role is FK to XX_SecurityGroupRole (group-specific role assignment)
-        if st.required_role:
-            # Get users who have this role assigned in their security group membership
-            # FIXED: Use assigned_roles=st.required_role instead of assigned_roles__in=[st.required_role]
-            # ManyToMany filter works directly with the FK object
-            users_with_role_ids = list(XX_UserGroupMembership.objects.filter(
-                security_group=security_group,
-                is_active=True,
-                assigned_roles=st.required_role  # FIXED: Direct FK lookup
-            ).values_list('user_id', flat=True))
-            
-            print(f"Users with required role {st.required_role}: {users_with_role_ids}")
-            
-            qs = qs.filter(id__in=users_with_role_ids)
-            print(f"Filtered queryset count: {qs.count()}")
-        else:
-            print(f"[WARNING] No required_role set for stage {st.name} - ALL group members will be assigned!")
+        print(f"Total users to assign: {qs.count()}")
         
         created = []
         for user in qs.distinct():
@@ -314,7 +319,8 @@ class ApprovalManager:
         print("=== END DEBUG ===\n")
         
         if not created:
-            print(f"[WARNING] No users found for stage {st.name} with role {st.required_role} in group {security_group.group_name}")
+            role_group = st.required_role.security_group.group_name if st.required_role else security_group.group_name
+            print(f"[WARNING] No users found for stage {st.name} with role {st.required_role} in group {role_group}")
         
         return created
 
