@@ -68,8 +68,12 @@ def convert_frontend_to_db(expression):
     if not expression:
         return expression
     
-    # Strip any stray closing braces at the end (cleanup malformed data)
-    expression = expression.rstrip('}')
+    # Strip only extra trailing braces if they are unmatched
+    extra_closing = expression.count('}') - expression.count('{')
+    if extra_closing > 0:
+        for _ in range(extra_closing):
+            if expression.endswith('}'):
+                expression = expression[:-1]
     
     # Replace {{Variable}} with datasource:Variable
     result = re.sub(r'\{\{(\w+)\}\}', r'datasource:\1', expression)
@@ -405,6 +409,167 @@ class ValidationWorkflowWithStepsSerializer(serializers.ModelSerializer):
                 instance.save()
         
         return instance
+
+
+class ValidationStepExportSerializer(serializers.ModelSerializer):
+    """Serializer for exporting ValidationSteps without internal metadata."""
+    
+    class Meta:
+        model = ValidationStep
+        fields = [
+            'id',
+            'name',
+            'description',
+            'order',
+            'x',
+            'y',
+            'left_expression',
+            'operation',
+            'right_expression',
+            'if_true_action',
+            'if_true_action_data',
+            'if_false_action',
+            'if_false_action_data',
+            'failure_message',
+            'is_active',
+        ]
+    
+    def to_representation(self, instance):
+        """Convert database format datasource:Variable to frontend format {{Variable}}"""
+        representation = super().to_representation(instance)
+        
+        if representation.get('left_expression'):
+            representation['left_expression'] = convert_db_to_frontend(representation['left_expression'])
+        if representation.get('right_expression'):
+            representation['right_expression'] = convert_db_to_frontend(representation['right_expression'])
+        
+        return representation
+
+
+class ValidationWorkflowExportSerializer(serializers.ModelSerializer):
+    """Serializer for exporting workflows with full step data."""
+    steps = ValidationStepExportSerializer(many=True, read_only=True)
+    initial_step_order = serializers.SerializerMethodField()
+    
+    class Meta:
+        model = ValidationWorkflow
+        fields = [
+            'id',
+            'name',
+            'description',
+            'execution_point',
+            'status',
+            'is_default',
+            'initial_step',
+            'initial_step_order',
+            'steps',
+        ]
+    
+    def get_initial_step_order(self, obj):
+        if obj.initial_step:
+            return obj.initial_step.order
+        return None
+
+
+class ValidationStepImportSerializer(serializers.ModelSerializer):
+    """Serializer for importing ValidationSteps with frontend expressions."""
+    id = serializers.IntegerField(required=False, allow_null=True)
+    
+    class Meta:
+        model = ValidationStep
+        fields = [
+            'id',
+            'name',
+            'description',
+            'order',
+            'x',
+            'y',
+            'left_expression',
+            'operation',
+            'right_expression',
+            'if_true_action',
+            'if_true_action_data',
+            'if_false_action',
+            'if_false_action_data',
+            'failure_message',
+            'is_active',
+        ]
+    
+    def to_internal_value(self, data):
+        """Convert frontend format {{Variable}} to database format datasource:Variable"""
+        data = data.copy() if hasattr(data, 'copy') else dict(data)
+        
+        if 'left_expression' in data and data['left_expression']:
+            data['left_expression'] = convert_frontend_to_db(data['left_expression'])
+        if 'right_expression' in data and data['right_expression']:
+            data['right_expression'] = convert_frontend_to_db(data['right_expression'])
+        
+        return super().to_internal_value(data)
+
+
+class ValidationWorkflowImportSerializer(serializers.Serializer):
+    """Serializer for importing workflows."""
+    id = serializers.IntegerField(required=False, allow_null=True)
+    name = serializers.CharField(max_length=255)
+    description = serializers.CharField(required=False, allow_blank=True, allow_null=True)
+    execution_point = serializers.CharField(required=False, allow_blank=True, default='general')
+    status = serializers.ChoiceField(
+        choices=[choice[0] for choice in ValidationWorkflow.STATUS_CHOICES],
+        required=False,
+        default='draft'
+    )
+    is_default = serializers.BooleanField(required=False, default=False)
+    initial_step = serializers.IntegerField(required=False, allow_null=True)
+    initial_step_order = serializers.IntegerField(required=False, allow_null=True)
+    steps = ValidationStepImportSerializer(many=True, required=False, default=list)
+
+
+class WorkflowExportRequestSerializer(serializers.Serializer):
+    """Serializer for workflow export requests."""
+    workflow_ids = serializers.ListField(
+        child=serializers.IntegerField(min_value=1),
+        allow_empty=False
+    )
+    ignore_missing = serializers.BooleanField(required=False, default=False)
+    as_file = serializers.BooleanField(required=False, default=False)
+
+
+class WorkflowImportFileRequestSerializer(serializers.Serializer):
+    """Serializer for workflow import file requests."""
+    file = serializers.FileField(required=True)
+    conflict_strategy = serializers.ChoiceField(
+        choices=['error', 'skip', 'rename'],
+        required=False,
+        default='error'
+    )
+    name_suffix = serializers.CharField(required=False, default=' (imported)')
+    allow_orphan_execution_point = serializers.BooleanField(required=False, default=False)
+    allow_external_step_refs = serializers.BooleanField(required=False, default=False)
+    abort_on_error = serializers.BooleanField(required=False, default=False)
+    set_status = serializers.ChoiceField(
+        choices=[choice[0] for choice in ValidationWorkflow.STATUS_CHOICES],
+        required=False
+    )
+    set_is_default = serializers.BooleanField(required=False)
+
+
+class WorkflowImportRequestSerializer(serializers.Serializer):
+    """Serializer for workflow import requests."""
+    workflows = ValidationWorkflowImportSerializer(many=True)
+    conflict_strategy = serializers.ChoiceField(
+        choices=['error', 'skip', 'rename'],
+        required=False,
+        default='error'
+    )
+    name_suffix = serializers.CharField(required=False, default=' (imported)')
+    allow_orphan_execution_point = serializers.BooleanField(required=False, default=False)
+    allow_external_step_refs = serializers.BooleanField(required=False, default=False)
+    abort_on_error = serializers.BooleanField(required=False, default=False)
+    set_status = serializers.ChoiceField(
+        choices=[choice[0] for choice in ValidationWorkflow.STATUS_CHOICES],
+        required=False
+    )
+    set_is_default = serializers.BooleanField(required=False)
 
 
 class ValidationStepExecutionSerializer(serializers.ModelSerializer):

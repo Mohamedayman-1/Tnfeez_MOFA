@@ -9,7 +9,11 @@ from rest_framework import viewsets, status
 from rest_framework.decorators import action
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated, AllowAny
+from rest_framework.exceptions import ValidationError
 from rest_framework.parsers import MultiPartParser, FormParser, JSONParser
+from django.db import transaction
+from django.utils import timezone
+from django.http import HttpResponse
 import json
 
 from .models import ValidationStep, ValidationWorkflow, ValidationExecution, ValidationStepExecution
@@ -18,11 +22,16 @@ from .serializers import (
     ValidationStepCreateSerializer,
     ValidationWorkflowSerializer,
     ValidationWorkflowWithStepsSerializer,
+    ValidationWorkflowExportSerializer,
     ValidationExecutionSerializer,
     ValidationStepExecutionSerializer,
     ValidationExecuteSerializer,
     ExcelUploadSerializer,
+    WorkflowExportRequestSerializer,
+    WorkflowImportFileRequestSerializer,
+    WorkflowImportRequestSerializer,
 )
+from .serializers import convert_frontend_to_db
 from .execution_engine import ValidationExecutionEngine
 
 
@@ -785,6 +794,7 @@ class ValidationWorkflowViewSet(viewsets.ModelViewSet):
     search_fields = ['name', 'description']
     ordering_fields = ['created_at', 'status']
     ordering = ['-created_at']
+    parser_classes = [JSONParser, MultiPartParser, FormParser]
     
     def get_serializer_class(self):
         """Use the enhanced serializer for all operations."""
@@ -796,6 +806,405 @@ class ValidationWorkflowViewSet(viewsets.ModelViewSet):
             serializer.save(created_by=self.request.user)
         else:
             serializer.save()
+
+    def _collect_next_step_ids(self, steps_data):
+        """Collect referenced next_step_id values from action_data."""
+        referenced_ids = set()
+        
+        for step_data in steps_data:
+            for key in ('if_true_action_data', 'if_false_action_data'):
+                action_data = step_data.get(key)
+                if isinstance(action_data, dict):
+                    next_step_id = action_data.get('next_step_id')
+                    if isinstance(next_step_id, str) and next_step_id.isdigit():
+                        next_step_id = int(next_step_id)
+                    if isinstance(next_step_id, int):
+                        referenced_ids.add(next_step_id)
+        
+        return referenced_ids
+
+    def _remap_step_references_for_import(self, steps, id_mapping):
+        """Remap next_step_id references using explicit ID mapping."""
+        if not id_mapping:
+            return
+        
+        for step in steps:
+            updated = False
+            
+            if step.if_true_action_data and isinstance(step.if_true_action_data, dict):
+                next_step_id = step.if_true_action_data.get('next_step_id')
+                if isinstance(next_step_id, str) and next_step_id.isdigit():
+                    next_step_id = int(next_step_id)
+                if next_step_id in id_mapping:
+                    step.if_true_action_data['next_step_id'] = id_mapping[next_step_id]
+                    updated = True
+            
+            if step.if_false_action_data and isinstance(step.if_false_action_data, dict):
+                next_step_id = step.if_false_action_data.get('next_step_id')
+                if isinstance(next_step_id, str) and next_step_id.isdigit():
+                    next_step_id = int(next_step_id)
+                if next_step_id in id_mapping:
+                    step.if_false_action_data['next_step_id'] = id_mapping[next_step_id]
+                    updated = True
+            
+            if updated:
+                step.save()
+
+    def _build_unique_workflow_name(self, base_name, execution_point, suffix):
+        """Generate a unique workflow name for a given execution point."""
+        candidate = f"{base_name}{suffix}"
+        counter = 1
+        
+        while ValidationWorkflow.objects.filter(
+            name=candidate,
+            execution_point=execution_point
+        ).exists():
+            counter += 1
+            candidate = f"{base_name}{suffix} {counter}"
+        
+        return candidate
+
+    def _get_workflow_datasource_usage(self, steps_data):
+        """Extract referenced datasource names from step expressions."""
+        from .expression_evaluator import ExpressionEvaluator
+        
+        referenced = set()
+        
+        for step_data in steps_data:
+            left_expression = step_data.get('left_expression')
+            right_expression = step_data.get('right_expression')
+            
+            if left_expression:
+                left_expression = convert_frontend_to_db(left_expression)
+                referenced.update(ExpressionEvaluator.get_referenced_datasources(left_expression))
+            
+            if right_expression:
+                right_expression = convert_frontend_to_db(right_expression)
+                referenced.update(ExpressionEvaluator.get_referenced_datasources(right_expression))
+        
+        return referenced
+
+    @action(detail=False, methods=['post'])
+    def export(self, request):
+        """
+        Export a list of workflows with full step definitions.
+        
+        Request body:
+            {
+                "workflow_ids": [1, 2, 3],
+                "ignore_missing": false
+            }
+        """
+        serializer = WorkflowExportRequestSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        
+        workflow_ids = serializer.validated_data['workflow_ids']
+        ignore_missing = serializer.validated_data['ignore_missing']
+        as_file = serializer.validated_data.get('as_file', False)
+        
+        workflows = ValidationWorkflow.objects.prefetch_related('steps').filter(id__in=workflow_ids)
+        workflow_map = {workflow.id: workflow for workflow in workflows}
+        
+        missing_ids = [workflow_id for workflow_id in workflow_ids if workflow_id not in workflow_map]
+        if missing_ids and not ignore_missing:
+            return Response(
+                {
+                    'success': False,
+                    'error': 'Some workflows were not found.',
+                    'missing_ids': missing_ids
+                },
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        ordered_workflows = [workflow_map[workflow_id] for workflow_id in workflow_ids if workflow_id in workflow_map]
+        export_data = ValidationWorkflowExportSerializer(ordered_workflows, many=True).data
+        payload = {
+            'success': True,
+            'exported_at': timezone.now().isoformat(),
+            'count': len(export_data),
+            'missing_ids': missing_ids,
+            'workflows': export_data
+        }
+        
+        if as_file:
+            timestamp = timezone.now().strftime('%Y%m%d_%H%M%S')
+            filename = f"validation_workflows_export_{timestamp}.json"
+            response = HttpResponse(
+                json.dumps(payload, indent=2),
+                content_type='application/json'
+            )
+            response['Content-Disposition'] = f'attachment; filename="{filename}"'
+            return response
+        
+        return Response(payload, status=status.HTTP_200_OK)
+
+    @action(detail=False, methods=['post'], url_path='import')
+    def import_workflows(self, request):
+        """
+        Import workflows with full step definitions.
+        
+        Request body:
+            {
+                "workflows": [{...}, {...}],
+                "conflict_strategy": "error|skip|rename",
+                "name_suffix": " (imported)",
+                "allow_orphan_execution_point": false,
+                "allow_external_step_refs": false,
+                "abort_on_error": false,
+                "set_status": "draft",
+                "set_is_default": false
+            }
+        """
+        if request.FILES.get('file'):
+            file_serializer = WorkflowImportFileRequestSerializer(data=request.data)
+            file_serializer.is_valid(raise_exception=True)
+            
+            upload_file = file_serializer.validated_data['file']
+            try:
+                file_content = upload_file.read().decode('utf-8')
+                file_payload = json.loads(file_content)
+            except UnicodeDecodeError as exc:
+                raise ValidationError("Import file must be UTF-8 encoded JSON.") from exc
+            except json.JSONDecodeError as exc:
+                raise ValidationError("Import file contains invalid JSON.") from exc
+            
+            if isinstance(file_payload, dict) and 'workflows' in file_payload:
+                file_payload = file_payload['workflows']
+            
+            if not isinstance(file_payload, list):
+                raise ValidationError("Import file must contain a list of workflows or a payload with 'workflows'.")
+            
+            payload = {
+                'workflows': file_payload,
+                'conflict_strategy': file_serializer.validated_data['conflict_strategy'],
+                'name_suffix': file_serializer.validated_data['name_suffix'],
+                'allow_orphan_execution_point': file_serializer.validated_data['allow_orphan_execution_point'],
+                'allow_external_step_refs': file_serializer.validated_data['allow_external_step_refs'],
+                'abort_on_error': file_serializer.validated_data['abort_on_error'],
+                'set_status': file_serializer.validated_data.get('set_status'),
+                'set_is_default': file_serializer.validated_data.get('set_is_default')
+            }
+        else:
+            serializer = WorkflowImportRequestSerializer(data=request.data)
+            serializer.is_valid(raise_exception=True)
+            payload = serializer.validated_data
+        
+        workflows_data = payload['workflows']
+        conflict_strategy = payload['conflict_strategy']
+        name_suffix = payload['name_suffix']
+        allow_orphan_execution_point = payload['allow_orphan_execution_point']
+        allow_external_step_refs = payload['allow_external_step_refs']
+        abort_on_error = payload['abort_on_error']
+        set_status = payload.get('set_status')
+        set_is_default = payload.get('set_is_default')
+        
+        user = request.user if request.user and request.user.is_authenticated else None
+        from .execution_point_registry import execution_point_registry
+        
+        results = []
+        errors = []
+        
+        def process_workflow(workflow_data):
+            workflow_data.pop('id', None)
+            steps_data = workflow_data.pop('steps', [])
+            initial_step_id = workflow_data.pop('initial_step', None)
+            initial_step_order = workflow_data.pop('initial_step_order', None)
+            original_name = workflow_data.get('name')
+            
+            if set_status is not None:
+                workflow_data['status'] = set_status
+            if set_is_default is not None:
+                workflow_data['is_default'] = set_is_default
+            
+            if workflow_data.get('is_default') and workflow_data.get('status') != 'active':
+                raise ValidationError("Default workflow must be active.")
+            
+            execution_point = workflow_data.get('execution_point') or 'general'
+            if not allow_orphan_execution_point and not execution_point_registry.exists(execution_point):
+                raise ValidationError(
+                    f"Execution point '{execution_point}' is not registered."
+                )
+            
+            referenced_datasources = self._get_workflow_datasource_usage(steps_data)
+            if referenced_datasources:
+                from .datasource_registry import datasource_registry
+                execution_point_exists = execution_point_registry.exists(execution_point)
+                
+                unregistered = sorted([
+                    name for name in referenced_datasources
+                    if not datasource_registry.exists(name)
+                ])
+                
+                if unregistered:
+                    raise ValidationError(
+                        f"Unregistered datasources used in workflow: {', '.join(unregistered)}"
+                    )
+                
+                if execution_point_exists:
+                    not_allowed = sorted([
+                        name for name in referenced_datasources
+                        if not execution_point_registry.is_datasource_allowed(execution_point, name)
+                    ])
+                    
+                    if not_allowed:
+                        raise ValidationError(
+                            f"Datasources not allowed for execution point '{execution_point}': {', '.join(not_allowed)}"
+                        )
+            
+            existing_workflow = ValidationWorkflow.objects.filter(
+                name=workflow_data['name'],
+                execution_point=execution_point
+            ).first()
+            
+            if existing_workflow:
+                if conflict_strategy == 'skip':
+                    return {
+                        'status': 'skipped',
+                        'reason': 'name_conflict',
+                        'name': existing_workflow.name,
+                        'execution_point': existing_workflow.execution_point,
+                        'existing_workflow_id': existing_workflow.id
+                    }
+                if conflict_strategy == 'rename':
+                    workflow_data['name'] = self._build_unique_workflow_name(
+                        workflow_data['name'],
+                        execution_point,
+                        name_suffix
+                    )
+                else:
+                    raise ValidationError(
+                        f"Workflow '{workflow_data['name']}' already exists for execution point '{execution_point}'."
+                    )
+            
+            if isinstance(initial_step_id, str) and initial_step_id.isdigit():
+                initial_step_id = int(initial_step_id)
+            
+            temp_step_ids = []
+            for step in steps_data:
+                temp_id = step.get('id')
+                if isinstance(temp_id, str) and temp_id.isdigit():
+                    temp_id = int(temp_id)
+                    step['id'] = temp_id
+                if temp_id is not None:
+                    temp_step_ids.append(temp_id)
+            if len(temp_step_ids) != len(set(temp_step_ids)):
+                raise ValidationError("Duplicate step IDs found in import data.")
+            
+            if not allow_external_step_refs:
+                referenced_ids = self._collect_next_step_ids(steps_data)
+                missing_refs = referenced_ids.difference(set(temp_step_ids))
+                if missing_refs:
+                    missing_list = sorted(missing_refs)
+                    raise ValidationError(
+                        f"Step references not found in workflow steps: {missing_list}"
+                    )
+                if initial_step_id is not None and initial_step_id not in temp_step_ids:
+                    raise ValidationError(
+                        "initial_step must reference a step ID included in the workflow steps."
+                    )
+            
+            if user:
+                workflow = ValidationWorkflow.objects.create(created_by=user, **workflow_data)
+            else:
+                workflow = ValidationWorkflow.objects.create(**workflow_data)
+            
+            created_steps = []
+            id_mapping = {}
+            
+            for step_data in steps_data:
+                temp_id = step_data.pop('id', None)
+                step_serializer = ValidationStepCreateSerializer(data=step_data)
+                step_serializer.is_valid(raise_exception=True)
+                
+                if user:
+                    step = step_serializer.save(created_by=user)
+                else:
+                    step = step_serializer.save()
+                
+                if temp_id is not None:
+                    id_mapping[temp_id] = step.id
+                
+                created_steps.append(step)
+                workflow.steps.add(step)
+            
+            self._remap_step_references_for_import(created_steps, id_mapping)
+            
+            if initial_step_id is not None and initial_step_id in id_mapping:
+                workflow.initial_step_id = id_mapping[initial_step_id]
+            elif initial_step_order is not None:
+                initial_step = workflow.steps.filter(order=initial_step_order).first()
+                if initial_step:
+                    workflow.initial_step = initial_step
+            elif not workflow.initial_step and workflow.steps.exists():
+                first_step = workflow.steps.order_by('order', 'id').first()
+                if first_step:
+                    workflow.initial_step = first_step
+            
+            workflow.save()
+            
+            result = {
+                'status': 'created',
+                'workflow_id': workflow.id,
+                'name': workflow.name,
+                'execution_point': workflow.execution_point,
+                'steps_created': len(created_steps),
+                'step_id_mapping': id_mapping
+            }
+            
+            if original_name != workflow.name:
+                result['original_name'] = original_name
+            
+            return result
+        
+        if abort_on_error:
+            try:
+                with transaction.atomic():
+                    for workflow_data in workflows_data:
+                        results.append(process_workflow(workflow_data))
+            except ValidationError as exc:
+                return Response(
+                    {
+                        'success': False,
+                        'error': str(exc),
+                        'results': results
+                    },
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+        else:
+            for index, workflow_data in enumerate(workflows_data):
+                try:
+                    with transaction.atomic():
+                        results.append(process_workflow(workflow_data))
+                except ValidationError as exc:
+                    errors.append({
+                        'index': index,
+                        'name': workflow_data.get('name'),
+                        'error': str(exc)
+                    })
+                except Exception as exc:
+                    errors.append({
+                        'index': index,
+                        'name': workflow_data.get('name'),
+                        'error': f"Unexpected error: {str(exc)}"
+                    })
+        
+        imported_count = len([r for r in results if r.get('status') == 'created'])
+        skipped_count = len([r for r in results if r.get('status') == 'skipped'])
+        
+        response_data = {
+            'success': len(errors) == 0,
+            'imported_at': timezone.now().isoformat(),
+            'imported_count': imported_count,
+            'skipped_count': skipped_count,
+            'error_count': len(errors),
+            'results': results
+        }
+        
+        if errors:
+            response_data['errors'] = errors
+        
+        response_status = status.HTTP_201_CREATED if not errors else status.HTTP_207_MULTI_STATUS
+        return Response(response_data, status=response_status)
     
     @action(detail=True, methods=['post'])
     def execute(self, request, pk=None):

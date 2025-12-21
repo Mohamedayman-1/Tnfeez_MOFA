@@ -27,6 +27,8 @@ urlpatterns = [
     path('workflows/<int:pk>/', views.ValidationWorkflowViewSet.as_view({'get': 'retrieve', 'put': 'update', 'patch': 'partial_update', 'delete': 'destroy'}), name='validationworkflow-detail'),
     path('workflows/<int:pk>/execute/', views.ValidationWorkflowViewSet.as_view({'post': 'execute'}), name='validationworkflow-execute'),
     path('workflows/by_execution_point/', views.ValidationWorkflowViewSet.as_view({'get': 'by_execution_point'}), name='validationworkflow-by-execution-point'),
+    path('workflows/export/', views.ValidationWorkflowViewSet.as_view({'post': 'export'}), name='validationworkflow-export'),
+    path('workflows/import/', views.ValidationWorkflowViewSet.as_view({'post': 'import_workflows'}), name='validationworkflow-import'),
     
     # ValidationExecution endpoints
     path('executions/', views.ValidationExecutionViewSet.as_view({'get': 'list'}), name='validationexecution-list'),
