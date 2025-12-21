@@ -20,6 +20,8 @@ from .models import (
 
 User = get_user_model()
 
+ARCHIVED_STAGE_ORDER_INDEX_START = 9999
+
 
 class ApprovalManager:
     """
@@ -113,9 +115,12 @@ class ApprovalManager:
         # Re-number execution_order sequentially (1, 2, 3...) for this transaction code group
         for index, assignment in enumerate(assignments, start=1):
             template = assignment.workflow_template
+            active_stage_templates = template.stages.filter(
+                order_index__lt=ARCHIVED_STAGE_ORDER_INDEX_START
+            )
             
             # Validate quorum config sanity
-            for st in template.stages.all():
+            for st in active_stage_templates:
                 if (
                     st.decision_policy == ApprovalWorkflowStageTemplate.POLICY_QUORUM
                     and st.quorum_count
@@ -344,6 +349,9 @@ class ApprovalManager:
             instance = ApprovalWorkflowInstance.objects.select_for_update().get(
                 pk=instance.pk
             )
+            active_stage_templates = instance.template.stages.filter(
+                order_index__lt=ARCHIVED_STAGE_ORDER_INDEX_START
+            )
 
             # prevent progressing finished workflows
             if instance.status in {
@@ -367,7 +375,7 @@ class ApprovalManager:
                     # continue after last completed
                     last_order = completed.first().stage_template.order_index
                     next_template = (
-                        instance.template.stages.filter(order_index__gt=last_order)
+                        active_stage_templates.filter(order_index__gt=last_order)
                         .order_by("order_index")
                         .first()
                     )
@@ -413,7 +421,7 @@ class ApprovalManager:
                     next_order = next_template.order_index
                 else:
                     # truly first activation
-                    next_template = instance.template.stages.order_by(
+                    next_template = active_stage_templates.order_by(
                         "order_index"
                     ).first()
                     if not next_template:
@@ -424,7 +432,7 @@ class ApprovalManager:
                 # (caller should have set them completed already; this path will just pick next order)
                 current_order = active.first().stage_template.order_index
                 next_q = (
-                    instance.template.stages.filter(order_index__gt=current_order)
+                    active_stage_templates.filter(order_index__gt=current_order)
                     .order_by("order_index")
                     .first()
                 )
@@ -470,7 +478,7 @@ class ApprovalManager:
                 next_order = next_q.order_index
 
             # activate all stage templates with order_index == next_order
-            next_templates = instance.template.stages.filter(
+            next_templates = active_stage_templates.filter(
                 order_index=next_order
             ).order_by("order_index")
             created_stage_instances = []

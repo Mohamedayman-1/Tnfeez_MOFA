@@ -184,7 +184,8 @@ class TransactionComprehensiveReportView(APIView):
                         "from_center": float(transfer.from_center) if transfer.from_center else 0.0,
                         "to_center": float(transfer.to_center) if transfer.to_center else 0.0,
                         "reason": transfer.reason or "",
-                        "budget_control": budget_info
+                        "gfs_code": 0
+                        # "budget_control": budget_info
                     }
                     transfer_details.append(transfer_data)
                 
@@ -200,18 +201,9 @@ class TransactionComprehensiveReportView(APIView):
                     "type": transaction.type or "",
                     "control_budget": transaction.control_budget or "",
                     "status": transaction.status,
-                    "status_level": transaction.status_level,
                     "notes": transaction.notes or "",
-                    "linked_transfer_id": transaction.linked_transfer_id,
-                    "summary": {
-                        "total_transfers": transfers.count(),
-                        "total_from_center": float(total_from),
-                        "total_to_center": float(total_to),
-                        "balanced": float(total_from) == float(total_to),
-                        "balance_difference": float(total_from) - float(total_to)
-                    },
                     "transfers": transfer_details,
-                    "status": "success"
+                    "status": "success",
                 }
                 
                 results.append(transaction_report)

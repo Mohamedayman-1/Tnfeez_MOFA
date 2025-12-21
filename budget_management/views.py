@@ -2148,14 +2148,19 @@ class Approval_Status(APIView):
         all_workflows_data = []
         
         for workflow in workflows:
-            # Stage templates in order
-            stage_templates = workflow.template.stages.all().order_by("order_index")
-
             # Map of stage_template_id -> stage_instance (if created)
             stage_instances_qs = workflow.stage_instances.select_related(
                 "stage_template", "workflow_instance"
             ).all()
             instances_by_tpl = {si.stage_template_id: si for si in stage_instances_qs}
+            stage_template_ids_with_instances = list(instances_by_tpl.keys())
+
+            # Stage templates in order (hide archived unless instantiated for this workflow)
+            archived_order_start = 9999
+            stage_templates = workflow.template.stages.filter(
+                Q(order_index__lt=archived_order_start)
+                | Q(id__in=stage_template_ids_with_instances)
+            ).order_by("order_index")
 
             # For rejected workflows, capture the latest reject per order_index to reflect group outcome
             latest_reject_by_order = {}

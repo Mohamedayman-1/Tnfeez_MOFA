@@ -73,6 +73,11 @@ class ApprovalWorkflowTemplateDetailSerializer(serializers.ModelSerializer):
     """Used for retrieve view (all workflow fields + stages)."""
 
     stages = ApprovalWorkflowStageTemplateInlineSerializer(many=True)
+    affect_active_instances = serializers.BooleanField(
+        write_only=True,
+        required=True,
+        # default=True,
+    )
 
     class Meta:
         model = ApprovalWorkflowTemplate
@@ -92,6 +97,7 @@ class ApprovalWorkflowTemplateDetailSerializer(serializers.ModelSerializer):
         return representation
 
     def create(self, validated_data):
+        validated_data.pop("affect_active_instances", None)
         stages_data = validated_data.pop("stages", [])
         
         print(f"\n=== DEBUG Workflow Create ===")
@@ -118,8 +124,96 @@ class ApprovalWorkflowTemplateDetailSerializer(serializers.ModelSerializer):
 
     def update(self, instance, validated_data):
         from django.db.models.deletion import ProtectedError
+        from django.db.models import Max
+        from django.db import transaction
+        from .models import (
+            ApprovalWorkflowStageInstance,
+            ApprovalWorkflowTemplate,
+            XX_WorkflowTemplateAssignment,
+        )
+        import re
         
+        affect_active_instances = validated_data.pop("affect_active_instances", True)
         stages_data = validated_data.pop("stages", None)
+
+        if not affect_active_instances:
+            with transaction.atomic():
+                base_code = instance.code or ""
+                match = re.match(r"^(?P<base>.+)-v(?P<ver>\d+)$", base_code, re.IGNORECASE)
+                if match:
+                    base_code = match.group("base")
+
+                new_version = (instance.version or 0) + 1
+                new_code = f"{base_code}-v{new_version}"
+                while ApprovalWorkflowTemplate.objects.filter(code=new_code).exists():
+                    new_version += 1
+                    new_code = f"{base_code}-v{new_version}"
+
+                template_data = {}
+                for field in ApprovalWorkflowTemplate._meta.fields:
+                    if field.name in {"id", "created_at", "updated_at"}:
+                        continue
+                    if field.name == "code":
+                        template_data["code"] = new_code
+                        continue
+                    if field.name == "version":
+                        template_data["version"] = new_version
+                        continue
+                    if field.name == "is_active":
+                        template_data["is_active"] = True
+                        continue
+                    if field.name in validated_data:
+                        template_data[field.name] = validated_data[field.name]
+                    else:
+                        template_data[field.name] = getattr(instance, field.name)
+
+                new_template = ApprovalWorkflowTemplate.objects.create(**template_data)
+
+                if stages_data is None:
+                    source_stages = instance.stages.all().order_by("order_index")
+                    for stage in source_stages:
+                        stage_payload = {}
+                        for field in ApprovalWorkflowStageTemplate._meta.fields:
+                            if field.name in {"id", "workflow_template", "created_at", "updated_at"}:
+                                continue
+                            stage_payload[field.name] = getattr(stage, field.name)
+                        ApprovalWorkflowStageTemplate.objects.create(
+                            workflow_template=new_template,
+                            **stage_payload,
+                        )
+                else:
+                    for stage_data in stages_data:
+                        stage_payload = {
+                            key: value
+                            for key, value in stage_data.items()
+                            if key != "id"
+                        }
+                        ApprovalWorkflowStageTemplate.objects.create(
+                            workflow_template=new_template,
+                            **stage_payload,
+                        )
+
+                existing_assignments = list(
+                    XX_WorkflowTemplateAssignment.objects.filter(workflow_template=instance)
+                )
+                for assignment in existing_assignments:
+                    XX_WorkflowTemplateAssignment.objects.create(
+                        security_group=assignment.security_group,
+                        workflow_template=new_template,
+                        execution_order=assignment.execution_order,
+                        transaction_code_filter=assignment.transaction_code_filter,
+                        is_active=assignment.is_active,
+                        created_by=assignment.created_by,
+                    )
+                if existing_assignments:
+                    XX_WorkflowTemplateAssignment.objects.filter(
+                        id__in=[assignment.id for assignment in existing_assignments]
+                    ).update(is_active=False)
+
+                instance.is_active = False
+                instance.save(update_fields=["is_active"])
+
+            return new_template
 
         # update workflow template fields
         for attr, value in validated_data.items():
@@ -134,15 +228,34 @@ class ApprovalWorkflowTemplateDetailSerializer(serializers.ModelSerializer):
             stages_to_delete = set(existing_stage_ids) - set(sent_stage_ids)
             for stage_id in stages_to_delete:
                 stage = ApprovalWorkflowStageTemplate.objects.get(id=stage_id)
-                try:
-                    # Try to delete the stage
-                    stage.delete()
-                except ProtectedError:
+                stage_in_use = ApprovalWorkflowStageInstance.objects.filter(
+                    stage_template_id=stage_id
+                ).exists()
+                if not stage_in_use:
+                    try:
+                        # Delete only when no runtime instances exist.
+                        stage.delete()
+                        continue
+                    except ProtectedError:
+                        stage_in_use = True
+
+                if stage_in_use:
                     # If deletion fails because stage is in use, move it to archived order_index (9999+)
-                    # This keeps it in the database for existing workflow instances but frees up the order_index
-                    stage.order_index = 9999 + stage.order_index  # Move to archived range
-                    stage.save()
-                    print(f"Cannot delete stage {stage_id} (has active instances), archived to order_index={stage.order_index}")
+                    # This keeps it in the database for existing workflow instances but frees up order_index.
+                    if stage.order_index < 9999:
+                        max_archived = ApprovalWorkflowStageTemplate.objects.filter(
+                            workflow_template=stage.workflow_template,
+                            order_index__gte=9999,
+                        ).aggregate(max_order=Max("order_index"))["max_order"] or 9998
+                        stage.order_index = max_archived + 1
+                        stage.save(update_fields=["order_index"])
+                        print(
+                            f"Cannot delete stage {stage_id} (has active instances), archived to order_index={stage.order_index}"
+                        )
+                    else:
+                        print(
+                            f"Cannot delete stage {stage_id} (has active instances), already archived at order_index={stage.order_index}"
+                        )
 
             # update or create stages
             for stage_data in stages_data:
