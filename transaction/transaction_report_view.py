@@ -10,7 +10,8 @@ from budget_management.models import xx_BudgetTransfer
 from account_and_entitys.models import (
     XX_SegmentType, 
     XX_TransactionSegment,
-    XX_DynamicBalanceReport
+    XX_DynamicBalanceReport,
+    XX_gfs_Mamping
 )
 from account_and_entitys.oracle import OracleBalanceReportManager
 
@@ -103,6 +104,15 @@ class TransactionComprehensiveReportView(APIView):
             is_active=True,
             is_required=True
         ).order_by('display_order')
+
+        gfs_mappings = {}
+        all_mappings = XX_gfs_Mamping.objects.filter(
+            is_active=True
+        ).values('From_value', 'Target_value')
+        for mapping in all_mappings:
+            from_value = mapping['From_value']
+            if from_value and from_value not in gfs_mappings:
+                gfs_mappings[from_value] = mapping['Target_value']
         
         for transaction_id in transaction_ids:
             try:
@@ -177,6 +187,9 @@ class TransactionComprehensiveReportView(APIView):
                         transfer,
                         segment_codes_dict
                     )
+
+                    segment_11_code = segment_codes_dict.get("11")
+                    gfs_code = gfs_mappings.get(segment_11_code, 0) if segment_11_code else 0
                     
                     transfer_data = {
                         "transfer_id": transfer.transfer_id,
@@ -184,11 +197,17 @@ class TransactionComprehensiveReportView(APIView):
                         "from_center": float(transfer.from_center) if transfer.from_center else 0.0,
                         "to_center": float(transfer.to_center) if transfer.to_center else 0.0,
                         "reason": transfer.reason or "",
-                        "gfs_code": 0
+                        "gfs_code": gfs_code
                         # "budget_control": budget_info
                     }
                     transfer_details.append(transfer_data)
                 
+
+
+                # get gfs code from dynamic balance report
+               
+
+
                 # Build comprehensive transaction report
                 transaction_report = {
                     "transaction_id": transaction_id,

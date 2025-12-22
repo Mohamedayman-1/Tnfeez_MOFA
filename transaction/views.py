@@ -1043,6 +1043,7 @@ class TransactionTransferListView(APIView):
             control_budget_records = getattr(transfer_obj, 'control_budget_records', [])
             transfer_response["control_budgets"] = control_budget_records
             transfer_response["control_budgets_count"] = len(control_budget_records)
+            transfer_response["reason"] = transfer_obj.reason
 
             response_data.append(transfer_response)
 
