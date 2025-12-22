@@ -5,6 +5,7 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework_simplejwt.tokens import RefreshToken, TokenError
 from datetime import timedelta, datetime, timezone as dt_timezone
 from django.utils import timezone
+from django.db import transaction
 
 from Admin_Panel import serializers
 from .models import UserProjects, xx_User, xx_UserAbility, xx_UserLevel, xx_notification
@@ -355,7 +356,35 @@ class UserDeleteView(APIView):
             return Response(
                 {"message": "User not found."}, status=status.HTTP_404_NOT_FOUND
             )
-        user.delete()
+        with transaction.atomic():
+            # Clear M2M relations first to avoid FK constraint failures.
+            if hasattr(user, "groups"):
+                user.groups.clear()
+            if hasattr(user, "user_permissions"):
+                user.user_permissions.clear()
+
+            # Clear or delete all related rows pointing to this user, including relations
+            # without reverse accessors (e.g., related_name='+').
+            for rel in user._meta.related_objects:
+                if rel.many_to_many:
+                    through = rel.through
+                    user_fk_fields = [
+                        f for f in through._meta.fields
+                        if f.is_relation and f.remote_field and f.remote_field.model == user.__class__
+                    ]
+                    for fk_field in user_fk_fields:
+                        through.objects.filter(**{fk_field.name: user}).delete()
+                    continue
+
+                related_model = rel.related_model
+                fk_field = rel.field
+                qs = related_model._default_manager.filter(**{fk_field.name: user})
+                if fk_field.null:
+                    qs.update(**{fk_field.name: None})
+                else:
+                    qs.delete()
+
+            user.delete()
         return Response(
             {"message": "User deleted successfully."}, status=status.HTTP_200_OK
         )

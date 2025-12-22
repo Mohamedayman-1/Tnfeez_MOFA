@@ -309,7 +309,8 @@ class ListBudgetTransferView(APIView):
         
         # SuperAdmin bypasses all security group checks
         user_memberships = None
-        if user.role == 1:
+        print(user.role)
+        if user.role == "superadmin":
             user_approval_groups = None  # None = see all groups
         else:
             # Check if user has approval permissions
@@ -366,6 +367,8 @@ class ListBudgetTransferView(APIView):
         # Apply user restriction if not admin
         if not IsAdmin().has_permission(request, self):
             transfers = transfers.filter(user_id=request.user.id)
+        else:
+            transfers=xx_BudgetTransfer.objects.all()
         # Apply status restriction
         if status_type:
             if status_type == "finished":
@@ -2291,6 +2294,12 @@ class Approval_Status(APIView):
                 else:
                     # Fallback
                     stage_info["status"] = inst_status
+
+                if (
+                    workflow.status == ApprovalWorkflowInstance.STATUS_APPROVED
+                    and stage_info["status"] == "completed"
+                ):
+                    stage_info["status"] = "approved"
 
                 results.append(stage_info)
 
