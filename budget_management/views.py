@@ -1011,8 +1011,18 @@ class UpdateBudgetTransferView(APIView):
                 )
 
             # Allow only specific fields to be updated
-            allowed_fields = {"notes", "description_x", "amount", "transaction_date", "security_group"}
+            allowed_fields = {
+                "notes",
+                "description_x",
+                "amount",
+                "transaction_date",
+                "security_group",
+                "transfer_type",
+                "control_budget",
+            }
             update_data = {k: v for k, v in request.data.items() if k in allowed_fields}
+            if "budget_control" in request.data and "control_budget" not in update_data:
+                update_data["control_budget"] = request.data.get("budget_control")
 
             if not update_data:
                 return Response(
