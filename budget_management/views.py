@@ -2148,18 +2148,20 @@ class Approval_Status(APIView):
         all_workflows_data = []
         
         for workflow in workflows:
+            archived_order_start = 9999
+
             # Map of stage_template_id -> stage_instance (if created)
             stage_instances_qs = workflow.stage_instances.select_related(
                 "stage_template", "workflow_instance"
-            ).all()
+            ).all().order_by("stage_template__order_index", "id")
             instances_by_tpl = {si.stage_template_id: si for si in stage_instances_qs}
-            stage_template_ids_with_instances = list(instances_by_tpl.keys())
+            has_archived_instances = stage_instances_qs.filter(
+                stage_template__order_index__gte=archived_order_start
+            ).exists()
 
-            # Stage templates in order (hide archived unless instantiated for this workflow)
-            archived_order_start = 9999
+            # Stage templates in order (hide archived stages)
             stage_templates = workflow.template.stages.filter(
-                Q(order_index__lt=archived_order_start)
-                | Q(id__in=stage_template_ids_with_instances)
+                order_index__lt=archived_order_start
             ).order_by("order_index")
 
             # For rejected workflows, capture the latest reject per order_index to reflect group outcome
@@ -2179,12 +2181,29 @@ class Approval_Status(APIView):
                         latest_reject_by_order[order_idx] = r
 
             results = []
+            order_index_map = {}
+            display_order = 0
 
-            for stpl in stage_templates:
-                si = instances_by_tpl.get(stpl.id)
+            def get_display_order(order_index):
+                nonlocal display_order
+                if order_index not in order_index_map:
+                    display_order += 1
+                    order_index_map[order_index] = display_order
+                return order_index_map[order_index]
+
+            if has_archived_instances:
+                stage_sources = [(si.stage_template, si) for si in stage_instances_qs]
+            else:
+                stage_sources = [(stpl, instances_by_tpl.get(stpl.id)) for stpl in stage_templates]
+
+            for stpl, si in stage_sources:
 
                 stage_info = {
-                    "order_index": stpl.order_index,
+                    "order_index": (
+                        get_display_order(stpl.order_index)
+                        if has_archived_instances
+                        else stpl.order_index
+                    ),
                     "name": stpl.name,
                     "decision_policy": stpl.decision_policy,
                 }
