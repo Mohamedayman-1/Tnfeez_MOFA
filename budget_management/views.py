@@ -2325,7 +2325,7 @@ class Approval_Status(APIView):
         return Response(
             {
                 "transaction_id": transaction_obj.transaction_id,
-                "transfer_status": transaction_obj.status,
+                "transfer_status": all_workflows_data[0]["workflow_status"],
                 "workflows": all_workflows_data,
             },
             status=status.HTTP_200_OK,

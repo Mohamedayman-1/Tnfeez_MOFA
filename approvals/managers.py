@@ -658,6 +658,9 @@ class ApprovalManager:
                 st.status = ApprovalWorkflowStageInstance.STATUS_COMPLETED
                 st.completed_at = now
                 st.save(update_fields=["status", "completed_at"])
+                budget_transfer = instance.budget_transfer
+                budget_transfer.status = "rejected"
+                budget_transfer.save(update_fields=["status"])
                 st.delegations.filter(active=True).update(
                     active=False, deactivated_at=now
                 )
