@@ -995,15 +995,7 @@ class ApprovalManager:
         Returns: (is_finished_bool, status_str)
         status_str in {"approved", "rejected", "cancelled", "pending", "in_progress"}
         """
-        # budget_transfer.workflow_instance only returns active (pending/in_progress),
-        # so it becomes None once the workflow is finished. Use related manager instead.
-        instance = None
-        try:
-            instance = budget_transfer.workflow_instances.order_by(
-                "-execution_order", "-id"
-            ).first()
-        except Exception:
-            instance = getattr(budget_transfer, "workflow_instance", None)
+        instance = getattr(budget_transfer, "workflow_instance", None)
         if not instance:
             return False, "no_instance"
 
