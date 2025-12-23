@@ -21,6 +21,7 @@ ALLOWED_HOSTS = [
     "127.0.0.1",
     "185.197.251.203",
     "www.lightidea.org",
+    "193.122.81.98"
 ]
 
 # Application definition
