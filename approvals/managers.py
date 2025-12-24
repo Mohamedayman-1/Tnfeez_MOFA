@@ -995,9 +995,46 @@ class ApprovalManager:
         Returns: (is_finished_bool, status_str)
         status_str in {"approved", "rejected", "cancelled", "pending", "in_progress"}
         """
+
+        # budget_transfer.workflow_instance only returns active (pending/in_progress),
+        # so it becomes None once the workflow is finished. Use related manager instead.
+        #instance = None
+        #try:
+        #    instance = budget_transfer.workflow_instances.order_by(
+        #        "-execution_order", "-id"
+        #    ).first()
+        #except Exception:
+        #    instance = getattr(budget_transfer, "workflow_instance", None)
+        #if not instance:
+        #    return False, "no_instance"
+ 
+        #if instance.status in {
+        #    ApprovalWorkflowInstance.STATUS_APPROVED,
+        #    ApprovalWorkflowInstance.STATUS_REJECTED,
+        #    ApprovalWorkflowInstance.STATUS_CANCELLED,
+        #}:
+        #    return True, instance.status.lower()
+ 
+        #return False, instance.status.lower()
         instance = getattr(budget_transfer, "workflow_instance", None)
         if not instance:
-            return False, "no_instance"
+            # No active workflow; fall back to latest instance or transfer status.
+            if getattr(budget_transfer, "status", None) in {"approved", "rejected", "cancelled"}:
+                return True, budget_transfer.status
+            last_instance = (
+                budget_transfer.workflow_instances.order_by("-execution_order", "-id").first()
+                if hasattr(budget_transfer, "workflow_instances")
+                else None
+            )
+            if not last_instance:
+                return False, "no_instance"
+            if last_instance.status in {
+                ApprovalWorkflowInstance.STATUS_APPROVED,
+                ApprovalWorkflowInstance.STATUS_REJECTED,
+                ApprovalWorkflowInstance.STATUS_CANCELLED,
+            }:
+                return True, last_instance.status.lower()
+            return False, last_instance.status.lower()
 
         if instance.status in {
             ApprovalWorkflowInstance.STATUS_APPROVED,

@@ -546,8 +546,8 @@ class ListBudgetTransferView(APIView):
                                 "comment": action.comment,
                                 "user": action.user.username if action.user else "System",
                                 "user_id": action.user.id if action.user else None,
-                                "stage_name": stage_instance.stage.name if stage_instance.stage else None,
-                                "stage_order": stage_instance.stage.order if stage_instance.stage else None,
+                                "stage_name": stage_instance.stage_template.name if stage_instance.stage_template else None,
+                                "stage_order": stage_instance.stage_template.order_index if stage_instance.stage_template else None,
                                 "created_at": action.created_at.strftime('%Y-%m-%d %H:%M:%S') if action.created_at else None
                             })
                     
