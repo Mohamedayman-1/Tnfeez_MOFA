@@ -405,17 +405,7 @@ class ApprovalManager:
                             budget_transfer.save(update_fields=['status'])
                             print(f"[INFO] Budget transfer {budget_transfer.code} status updated to 'approved'")
                             
-                            # Trigger Oracle upload for approved workflows
-                            from budget_management.tasks import upload_budget_to_oracle, upload_journal_to_oracle
-                            
-                            if budget_transfer.code and budget_transfer.code[0:3] != "HFR":
-                                print(f"[INFO] Queuing budget upload task for transaction {budget_transfer.transaction_id}")
-                                upload_budget_to_oracle.delay(
-                                    transaction_id=budget_transfer.transaction_id,
-                                    entry_type="Approve"
-                                )
-                            else:
-                                print(f"[INFO] Skipping Oracle upload for HFR transaction {budget_transfer.code}")
+                            # Oracle upload is triggered elsewhere (avoid duplicate uploads)
                         
                         return instance
                     next_order = next_template.order_index
@@ -462,17 +452,7 @@ class ApprovalManager:
                         budget_transfer.save(update_fields=['status'])
                         print(f"[INFO] Budget transfer {budget_transfer.code} status updated to 'approved'")
                         
-                        # Trigger Oracle upload for approved workflows
-                        from budget_management.tasks import upload_budget_to_oracle, upload_journal_to_oracle
-                        
-                        if budget_transfer.code and budget_transfer.code[0:3] != "HFR":
-                            print(f"[INFO] Queuing budget upload task for transaction {budget_transfer.transaction_id}")
-                            upload_budget_to_oracle.delay(
-                                transaction_id=budget_transfer.transaction_id,
-                                entry_type="Approve"
-                            )
-                        else:
-                            print(f"[INFO] Skipping Oracle upload for HFR transaction {budget_transfer.code}")
+                        # Oracle upload is triggered elsewhere (avoid duplicate uploads)
                     
                     return instance
                 next_order = next_q.order_index

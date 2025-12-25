@@ -190,60 +190,96 @@ class CreateBudgetTransferView(APIView):
                 
                 # ========== HFR AUTO-CALCULATION LOGIC ==========
                 # If source is HFR, calculate remaining hold and adjust amounts automatically
-                hfr_remaining = Decimal('0.00')
+                hfr_remaining = Decimal("0.00")
                 is_hfr_source = budget and budget.code and budget.code[0:3] == "HFR"
-                
+                far_transfer_lines = []
+
                 if is_hfr_source:
                     # Get HFR original hold amount (total from_center)
                     hfr_transfers = xx_TransactionTransfer.objects.filter(transaction_id=linked_budget_transfer)
                     hfr_original_hold = sum(
-                        Decimal(str(t.from_center)) if t.from_center else Decimal('0.00')
+                        Decimal(str(t.from_center)) if t.from_center else Decimal("0.00")
                         for t in hfr_transfers
                     )
-                    
-                    # Find all FAR transfers already linked to this HFR
+
+                    # Find all FAR transfers already linked to this HFR (exclude current draft)
                     linked_fars = xx_BudgetTransfer.objects.filter(
                         linked_transfer_id=linked_budget_transfer,
                         code__startswith="FAR"
-                    )
-                    
+                    ).exclude(transaction_id=transfer.transaction_id)
+
+                    for far in linked_fars:
+                        far_transfers = xx_TransactionTransfer.objects.filter(transaction_id=far.transaction_id)
+                        for far_transfer in far_transfers:
+                            far_transfer_lines.append(
+                                {
+                                    "segments": far_transfer.get_segments_dict(),
+                                    "from_center": (
+                                        Decimal(str(far_transfer.from_center))
+                                        if far_transfer.from_center
+                                        else Decimal("0.00")
+                                    ),
+                                }
+                            )
+
                     # Calculate total already used
-                    total_used = sum(
-                        Decimal(str(far.amount)) if far.amount else Decimal('0.00')
-                        for far in linked_fars
-                    )
-                    
+                    total_used = sum(line["from_center"] for line in far_transfer_lines)
+
                     # Calculate remaining in HFR hold
                     hfr_remaining = hfr_original_hold - total_used
-                    
-                    print(f"🔍 HFR Auto-Calculation:")
+                    if hfr_remaining < 0:
+                        hfr_remaining = Decimal("0.00")
+
+                    print("HFR auto-calculation:")
                     print(f"   Original Hold: {hfr_original_hold}")
                     print(f"   Already Used: {total_used}")
                     print(f"   Remaining: {hfr_remaining}")
-                
+
                 for transfer_item in transfers:
                     # Determine the actual amounts to use based on HFR remaining
                     from_center_amount = transfer_item.from_center
                     to_center_amount = transfer_item.to_center
-                    
+
                     if is_hfr_source and from_center_amount:
                         # User is taking from HFR hold
                         requested_amount = Decimal(str(from_center_amount))
-                        
-                        if requested_amount <= hfr_remaining:
-                            # Scenario 1: Requested amount fits within HFR hold
-                            # Use only from HFR (no change needed)
+                        hfr_segments = transfer_item.get_segments_dict()
+
+                        available_from_hold = hfr_remaining
+                        if hfr_segments:
+                            line_used = Decimal("0.00")
+                            for far_line in far_transfer_lines:
+                                segments_match = True
+                                for seg_id in hfr_segments.keys():
+                                    hfr_code = hfr_segments.get(seg_id, {}).get("from_code", "")
+                                    far_code = far_line["segments"].get(seg_id, {}).get("from_code", "")
+                                    if hfr_code != far_code:
+                                        segments_match = False
+                                        break
+                                if segments_match:
+                                    line_used += far_line["from_center"]
+
+                            line_remaining = requested_amount - line_used
+                            if line_remaining < 0:
+                                line_remaining = Decimal("0.00")
+                            available_from_hold = line_remaining
+
+                        if available_from_hold < 0:
+                            available_from_hold = Decimal("0.00")
+                        if available_from_hold > hfr_remaining:
+                            available_from_hold = hfr_remaining
+
+                        if requested_amount <= available_from_hold:
                             from_center_amount = requested_amount
-                            print(f"   ✅ Using {requested_amount} from HFR hold (sufficient)")
+                            print(f"   Using {requested_amount} from HFR hold (sufficient)")
                         else:
-                            # Scenario 2: Requested amount > HFR remaining
-                            # This will be handled by taking remaining from HFR + rest from fund
-                            # The "rest from fund" happens automatically via available budget
-                            from_center_amount = requested_amount
-                            extra_needed = requested_amount - hfr_remaining
-                            print(f"   ⚠️  Requested {requested_amount} > Remaining {hfr_remaining}")
-                            print(f"   📊 Will use {hfr_remaining} from HFR + {extra_needed} from available fund")
-                    
+                            from_center_amount = available_from_hold
+                            extra_needed = requested_amount - available_from_hold
+                            print(f"   Requested {requested_amount} > Remaining {available_from_hold}")
+                            print(f"   Will use {available_from_hold} from HFR + {extra_needed} from available fund")
+
+                        if hfr_remaining > 0:
+                            hfr_remaining = max(hfr_remaining - from_center_amount, Decimal("0.00"))
                     # Create new transaction transfer with calculated amounts
                     new_transfer = xx_TransactionTransfer.objects.create(
                         transaction=transfer,
