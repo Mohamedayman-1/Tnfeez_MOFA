@@ -42,18 +42,6 @@ execution_point_registry.register(
 
 on_transfer_line_submit = 'on_transfer_line_submit'
 
-# Build segment datasources dynamically - only for segments that exist in database
-def get_segment_datasources():
-    """Get segment datasources based on actual XX_SegmentType records."""
-    try:
-        from account_and_entitys.models import XX_SegmentType
-        segment_types = XX_SegmentType.objects.filter(is_active=True).order_by('oracle_segment_number')
-        return [f'Transaction_Line_SEGMENT_{seg.oracle_segment_number}' for seg in segment_types]
-    except Exception:
-        return []  # During migrations or if table doesn't exist yet
-
-segment_datasources = get_segment_datasources()
-
 execution_point_registry.register(
     code=on_transfer_line_submit,
     name='Transfer Line Submission',
@@ -77,5 +65,6 @@ execution_point_registry.register(
         'User_Name',
         'User_Role',
         'User_Level',
-    ] + segment_datasources  # Add all 16 segment datasources
+        execution_point_registry.DYNAMIC_SEGMENT_MARKER
+    ]  # Segment datasources are expanded lazily at runtime
 )

@@ -72,7 +72,10 @@ def get_transaction_line_segment(transfer_id, type_number):
     return ''
 
 
-def _register_segment_datasources():
+_segment_datasources_registered = False
+
+
+def register_segment_datasources():
     """
     Dynamically register datasources for all segment types in the database.
     
@@ -84,9 +87,12 @@ def _register_segment_datasources():
     
     All use StandardParams.TRANSFER_ID for consistency with auto-population!
     """
-    from account_and_entitys.models import XX_SegmentType
-    
     try:
+        global _segment_datasources_registered
+        if _segment_datasources_registered:
+            return
+
+        from account_and_entitys.models import XX_SegmentType
         # Get all active segment types ordered by oracle_segment_number
         segment_types = XX_SegmentType.objects.filter(is_active=True).order_by('oracle_segment_number')
         
@@ -115,7 +121,7 @@ def _register_segment_datasources():
                 return_type="string",
                 description=f"Segment {segment_num} ({seg_type.segment_name}) for a transaction line"
             )(segment_function)
-            
+        _segment_datasources_registered = True
     except Exception as e:
         # If database not ready (during migrations), skip registration
         import sys
@@ -123,8 +129,8 @@ def _register_segment_datasources():
             print(f"Warning: Could not register segment datasources: {e}")
 
 
-# Register segment datasources when module is loaded
-_register_segment_datasources()
+# Segment datasources are registered lazily on first access to avoid
+# database access during app initialization.
 
 
 # =================================================================================

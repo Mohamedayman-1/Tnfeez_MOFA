@@ -23,6 +23,7 @@ class ExecutionPointRegistry:
     
     Each execution point can specify which datasources are allowed.
     """
+    DYNAMIC_SEGMENT_MARKER = '__DYNAMIC_SEGMENTS__'
     
     def __init__(self):
         self.execution_points: Dict[str, Dict] = {}
@@ -157,7 +158,11 @@ class ExecutionPointRegistry:
         ep = self.execution_points.get(code)
         if not ep:
             return []
-        return ep.get('allowed_datasources', [])
+        allowed = list(ep.get('allowed_datasources', []))
+        if self.DYNAMIC_SEGMENT_MARKER in allowed:
+            allowed = [ds for ds in allowed if ds != self.DYNAMIC_SEGMENT_MARKER]
+            allowed.extend(self._get_dynamic_segment_datasources())
+        return allowed
     
     def get_allowed_datasources_details(self, code: str) -> List[Dict]:
         """
@@ -279,9 +284,23 @@ class ExecutionPointRegistry:
         
         return False
 
+    def _get_dynamic_segment_datasources(self) -> List[str]:
+        """Resolve segment datasource names from active XX_SegmentType records."""
+        try:
+            from account_and_entitys.models import XX_SegmentType
+            segment_numbers = (
+                XX_SegmentType.objects.filter(is_active=True)
+                .order_by('oracle_segment_number')
+                .values_list('oracle_segment_number', flat=True)
+            )
+            return [f'Transaction_Line_SEGMENT_{num}' for num in segment_numbers]
+        except Exception:
+            return []
+
 
 # Global registry instance
 execution_point_registry = ExecutionPointRegistry()
+execution_point_registry.DYNAMIC_SEGMENT_MARKER = ExecutionPointRegistry.DYNAMIC_SEGMENT_MARKER
 
 
 # Register default execution point (no datasources allowed by default)

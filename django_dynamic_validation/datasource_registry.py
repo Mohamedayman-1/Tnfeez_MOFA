@@ -124,7 +124,9 @@ class DataSourceRegistry:
             The registered function, or None if not found
         """
         if name not in self._registry:
-            return None
+            self._try_register_segment_datasources(name)
+            if name not in self._registry:
+                return None
         return self._registry[name]['function']
     
     def get_metadata(self, name: str) -> Optional[Dict[str, Any]]:
@@ -138,7 +140,9 @@ class DataSourceRegistry:
             Dictionary with metadata (parameters, return_type, description), or None
         """
         if name not in self._registry:
-            return None
+            self._try_register_segment_datasources(name)
+            if name not in self._registry:
+                return None
         
         metadata = self._registry[name].copy()
         # Don't include the actual function in metadata
@@ -247,6 +251,8 @@ class DataSourceRegistry:
         Returns:
             True if registered, False otherwise
         """
+        if name not in self._registry:
+            self._try_register_segment_datasources(name)
         return name in self._registry
     
     def unregister(self, name: str) -> bool:
@@ -267,6 +273,16 @@ class DataSourceRegistry:
     def clear(self):
         """Clear all registered datasources (mainly for testing)."""
         self._registry.clear()
+
+    def _try_register_segment_datasources(self, name: str) -> None:
+        """Lazily register segment datasources when referenced."""
+        if not name.startswith('Transaction_Line_SEGMENT_'):
+            return
+        try:
+            from django_dynamic_validation.datasources.transfer.transfer_datasources import register_segment_datasources
+            register_segment_datasources()
+        except Exception:
+            return
 
 
 # Global singleton instance

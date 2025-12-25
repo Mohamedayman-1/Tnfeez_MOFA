@@ -561,6 +561,38 @@ class ValidationStepViewSet(viewsets.ModelViewSet):
                 "description": "Check if value does NOT exist in a list",
                 "list_formats": ["JSON array: [1,2,3]", "Comma-separated: 1,2,3", "Excel upload"]
             },
+            {
+                "value": "in_contain",
+                "label": "In List Contain",
+                "supports_types": ["str"],
+                "requires_list": True,
+                "description": "Check if value exists in a list",
+                "list_formats": ["JSON array: [1,2,3]", "Comma-separated: 1,2,3", "Excel upload"]
+            },
+            {
+                "value": "not_in_contain",
+                "label": "Not In List Contain",
+                "supports_types": ["str"],
+                "requires_list": True,
+                "description": "Check if value does NOT exist in a list",
+                "list_formats": ["JSON array: [1,2,3]", "Comma-separated: 1,2,3", "Excel upload"]
+            },
+            {
+                "value": "in_starts_with",
+                "label": "In List Starts With",
+                "supports_types": ["str"],
+                "requires_list": True,
+                "description": "Check if value starts with any value in a list",
+                "list_formats": ["JSON array: [1,2,3]", "Comma-separated: 1,2,3", "Excel upload"]
+            },
+            {
+                "value": "not_in_starts_with",
+                "label": "Not In List Starts With",
+                "supports_types": ["str"],
+                "requires_list": True,
+                "description": "Check if value does NOT exist in a list",
+                "list_formats": ["JSON array: [1,2,3]", "Comma-separated: 1,2,3", "Excel upload"]
+            },
         ]
         
         return Response({
@@ -581,7 +613,7 @@ class ValidationStepViewSet(viewsets.ModelViewSet):
             - description: Step description (optional)
             - order: Step order
             - left_expression: Left side expression
-            - operation: 'in' or 'not_in'
+            - operation: 'in', 'not_in', 'in_contain', 'not_in_contain', 'in_starts_with', 'not_in_starts_with'
             - if_true_action: Action if condition is true
             - if_false_action: Action if condition is false
             - if_true_action_data: JSON data for true action (optional)
@@ -721,7 +753,7 @@ class ValidationStepViewSet(viewsets.ModelViewSet):
             evaluator = ExpressionEvaluator()
             
             # For IN/NOT IN operations, handle list parsing
-            if step.operation in ['in', 'not_in']:
+            if step.operation in ['in', 'not_in', 'in_contain', 'not_in_contain', 'in_starts_with', 'not_in_starts_with']:
                 engine = ValidationExecutionEngine(None)
                 left_value = evaluator.evaluate(step.left_expression, datasource_params)
                 right_value = engine._parse_list_expression(step.right_expression)
@@ -1262,11 +1294,15 @@ class ValidationWorkflowViewSet(viewsets.ModelViewSet):
             if failure_messages:
                 response_data['failure_messages'] = failure_messages
                 response_data['error'] = failure_messages[0]['message']  # First message as main error
+
+            response_status = status.HTTP_201_CREATED
+            if execution.status == 'error':
+                response_status = status.HTTP_400_BAD_REQUEST
+                response_data['error_type'] = 'validation_error'
+                if execution.context_data and execution.context_data.get('error'):
+                    response_data['error'] = execution.context_data['error']
             
-            return Response(
-                response_data,
-                status=status.HTTP_201_CREATED
-            )
+            return Response(response_data, status=response_status)
         except ValueError as e:
             # Type validation or other validation errors
             return Response(
@@ -1318,12 +1354,12 @@ class ValidationWorkflowViewSet(viewsets.ModelViewSet):
         # Validate each step
         for step in workflow.steps.all():
             # Check operation is valid
-            valid_operations = ['==', '!=', '>', '<', '>=', '<=', 'in', 'not_in']
+            valid_operations = ['==', '!=', '>', '<', '>=', '<=', 'in', 'not_in', 'in_contain', 'not_in_contain', 'in_starts_with', 'not_in_starts_with', 'contains', 'starts_with', 'ends_with','between', 'is_null', 'is_not_null']
             if step.operation not in valid_operations:
                 errors.append(f"Step '{step.name}': Invalid operation '{step.operation}'")
             
             # Check IN/NOT IN operations have list format
-            if step.operation in ['in', 'not_in']:
+            if step.operation in ['in', 'not_in', 'in_contain', 'not_in_contain', 'in_starts_with', 'not_in_starts_with', 'between']:
                 try:
                     from .execution_engine import ValidationExecutionEngine
                     engine = ValidationExecutionEngine(None)
@@ -1344,7 +1380,7 @@ class ValidationWorkflowViewSet(viewsets.ModelViewSet):
             
             for step in workflow.steps.all():
                 try:
-                    if step.operation in ['in', 'not_in']:
+                    if step.operation in ['in', 'not_in', 'in_contain', 'not_in_contain', 'in_starts_with', 'not_in_starts_with', 'between']:
                         left_value = evaluator.evaluate(step.left_expression, datasource_params)
                         right_value = engine._parse_list_expression(step.right_expression)
                     else:

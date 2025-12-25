@@ -679,8 +679,8 @@ class ExcelUploadSerializer(serializers.Serializer):
     )
     operation = serializers.ChoiceField(
         required=True,
-        choices=['in', 'not_in'],
-        help_text="Operation: 'in' or 'not_in'"
+        choices=['in', 'not_in', 'in_contain', 'not_in_contain', 'in_starts_with', 'not_in_starts_with'],
+        help_text="Operation: 'in', 'not_in', 'in_contain', 'not_in_contain', 'in_starts_with', 'not_in_starts_with'"
     )
     if_true_action = serializers.ChoiceField(
         required=True,
@@ -823,7 +823,8 @@ class BulkStepUpdateSerializer(serializers.Serializer):
     
     def validate_operation(self, value):
         """Validate that operation is supported."""
-        valid_operations = ['==', '!=', '>', '<', '>=', '<=', 'in', 'not_in']
+        valid_operations = ['==', '!=', '>', '<', '>=', '<=', 'in', 'not_in', 'in_contain', 'not_in_contain', 'in_starts_with', 'not_in_starts_with',
+                            'between', 'contains', 'starts_with', 'ends_with', 'is_null', 'is_not_null']
         if value not in valid_operations:
             raise serializers.ValidationError(
                 f"Invalid operation '{value}'. Must be one of: {', '.join(valid_operations)}"
@@ -836,7 +837,7 @@ class BulkStepUpdateSerializer(serializers.Serializer):
         right_expression = data.get('right_expression')
         
         # For IN/NOT IN operations, validate list format
-        if operation in ['in', 'not_in']:
+        if operation in ['in', 'not_in', 'in_contain', 'not_in_contain', 'in_starts_with', 'not_in_starts_with']:
             try:
                 import json
                 # Try to parse as JSON array

@@ -162,7 +162,7 @@ class ValidationExecutionEngine:
         left_value = self.evaluator.evaluate(step.left_expression, self.datasource_params)
         
         # For IN and NOT IN operations, right side should be a list
-        if step.operation in ['in', 'not_in']:
+        if step.operation in ['in', 'not_in', 'in_contain', 'not_in_contain', 'in_starts_with', 'not_in_starts_with']:
             right_value = self._parse_list_expression(step.right_expression)
         # For BETWEEN operation, right side should be a list with 2 elements
         elif step.operation == 'between':
@@ -196,6 +196,14 @@ class ValidationExecutionEngine:
             result = left_value in right_value
         elif step.operation == 'not_in':
             result = left_value not in right_value
+        elif step.operation == 'in_contain':
+            result = any(item in left_value for item in right_value)
+        elif step.operation == 'not_in_contain':
+            result = all(item not in left_value for item in right_value)
+        elif step.operation == 'in_starts_with':
+            result = any(str(item).startswith(str(left_value)) for item in right_value)
+        elif step.operation == 'not_in_starts_with':
+            result = all(not str(item).startswith(str(left_value)) for item in right_value)
         # String operations
         elif step.operation == 'contains':
             result = right_value in left_value
@@ -310,7 +318,7 @@ class ValidationExecutionEngine:
         Args:
             left_value: Left side value
             right_value: Right side value
-            operation: Comparison operation (==, !=, >, <, >=, <=, in, not_in)
+            operation: Comparison operation (==, !=, >, <, >=, <=, in, not_in, in_contain, not_in_contain, in_starts_with, not_in_starts_with, contains, starts_with, ends_with, between)
             step_name: Name of the step (for error messages)
             
         Raises:
@@ -320,7 +328,7 @@ class ValidationExecutionEngine:
         right_type = type(right_value).__name__
         
         # For IN and NOT IN operations, right side must be a list
-        if operation in ['in', 'not_in']:
+        if operation in ['in', 'not_in', 'in_contain', 'not_in_contain', 'in_starts_with', 'not_in_starts_with']:
             if not isinstance(right_value, list):
                 raise ValueError(
                     f"Type error in step '{step_name}': IN/NOT IN operations require a list on the right side. "
@@ -338,12 +346,11 @@ class ValidationExecutionEngine:
                     f"Got {right_type} with {len(right_value) if isinstance(right_value, list) else 0} values."
                 )
             # Check that left value and range values are numeric
-            if not isinstance(left_value, (int, float)) or not isinstance(left_value, bool):
-                if isinstance(left_value, bool):
-                    raise ValueError(
-                        f"Type error in step '{step_name}': BETWEEN operation requires numeric values. "
-                        f"Got boolean on left side."
-                    )
+            if not isinstance(left_value, (int, float)) or isinstance(left_value, bool):
+                raise ValueError(
+                    f"Type error in step '{step_name}': BETWEEN operation requires numeric values. "
+                    f"Got {left_type} on left side."
+                )
             for val in right_value:
                 if not isinstance(val, (int, float)) or isinstance(val, bool):
                     raise ValueError(

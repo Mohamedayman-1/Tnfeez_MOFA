@@ -17,6 +17,7 @@ urlpatterns = [
     # ValidationStep endpoints
     path('steps/', views.ValidationStepViewSet.as_view({'get': 'list', 'post': 'create'}), name='validationstep-list'),
     path('steps/<int:pk>/', views.ValidationStepViewSet.as_view({'get': 'retrieve', 'put': 'update', 'patch': 'partial_update', 'delete': 'destroy'}), name='validationstep-detail'),
+    path('steps/<int:pk>/validate_types/', views.ValidationStepViewSet.as_view({'post': 'validate_types'}), name='validationstep-validate-types'),
     path('steps/operations/', views.ValidationStepViewSet.as_view({'get': 'operations'}), name='validationstep-operations'),
     path('steps/upload_excel/', views.ValidationStepViewSet.as_view({'post': 'upload_excel'}), name='validationstep-upload-excel'),
     path('steps/bulk_create/', views.ValidationStepViewSet.as_view({'post': 'bulk_create'}), name='validationstep-bulk-create'),
@@ -26,6 +27,7 @@ urlpatterns = [
     path('workflows/', views.ValidationWorkflowViewSet.as_view({'get': 'list', 'post': 'create'}), name='validationworkflow-list'),
     path('workflows/<int:pk>/', views.ValidationWorkflowViewSet.as_view({'get': 'retrieve', 'put': 'update', 'patch': 'partial_update', 'delete': 'destroy'}), name='validationworkflow-detail'),
     path('workflows/<int:pk>/execute/', views.ValidationWorkflowViewSet.as_view({'post': 'execute'}), name='validationworkflow-execute'),
+    path('workflows/<int:pk>/validate/', views.ValidationWorkflowViewSet.as_view({'post': 'validate'}), name='validationworkflow-validate'),
     path('workflows/by_execution_point/', views.ValidationWorkflowViewSet.as_view({'get': 'by_execution_point'}), name='validationworkflow-by-execution-point'),
     path('workflows/export/', views.ValidationWorkflowViewSet.as_view({'post': 'export'}), name='validationworkflow-export'),
     path('workflows/import/', views.ValidationWorkflowViewSet.as_view({'post': 'import_workflows'}), name='validationworkflow-import'),
