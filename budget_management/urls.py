@@ -6,6 +6,7 @@ from .views import (
     ApproveBudgetTransferView,
     GetBudgetTransferView,
     Oracle_Status,
+    Transction_unhold_View,
     UpdateBudgetTransferView,
     DeleteBudgetTransferView,
     transcationtransferapprovel_reject,
@@ -74,6 +75,13 @@ urlpatterns = [
         transcationtransferapprovel_reject.as_view(),
         name="transaction-approve-reject",
     ),
+
+
+    path("transfers/unhold/", Transction_unhold_View.as_view()),
+
+
+
+
     # File upload and delete endpoints
     path(
         "transfers/upload-files/",

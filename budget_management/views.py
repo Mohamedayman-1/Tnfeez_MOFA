@@ -2545,3 +2545,86 @@ class TransactionSecurityGroupView(APIView):
                 {"error": "Transaction not found"},
                 status=status.HTTP_404_NOT_FOUND
             )
+
+
+
+
+
+class Transction_unhold_View(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        try:
+
+            transaction_id = request.data.get("transaction_id",None)
+            if not transaction_id or not isinstance(transaction_id, list):
+                return Response(
+                    {"error": "transaction_ids must be a non-empty list"},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+            results = []
+  
+            # Calculate remaining unused amount
+            hfr_transfers = xx_TransactionTransfer.objects.filter(transaction_id=transaction_id)
+            original_hold = sum(
+                Decimal(str(t.from_center)) if t.from_center else Decimal('0.00')
+                for t in hfr_transfers
+            )
+            
+            # Find all approved/in-progress FAR transfers linked to this HFR
+            linked_fars = xx_BudgetTransfer.objects.filter(
+                linked_transfer_id=transaction_id,
+                code__startswith="FAR"
+            ).filter(
+                Q(status="approved") | Q(status_level__gte=2)
+            ).exclude(
+                status_level__lt=1
+            )
+            
+            total_used = Decimal('0.00')
+            for far in linked_fars:
+                far_transfers = xx_TransactionTransfer.objects.filter(transaction_id=far.transaction_id)
+                far_total = sum(
+                    Decimal(str(t.from_center)) if t.from_center else Decimal('0.00')
+                    for t in far_transfers
+                )
+                total_used += far_total
+            
+            remaining = original_hold - total_used
+            
+            print(f"🔴 HFR REJECTION: Transaction {transaction_id}")
+            print(f"   Original Hold: {original_hold}")
+            print(f"   Already Used: {total_used}")
+            print(f"   Remaining to Return: {remaining}")
+            
+            # Only upload journal if there's remaining amount to return
+            if remaining > 0:
+                print(f"Queuing journal upload for HFR rejection (returning {remaining})")
+                upload_journal_to_oracle.delay(
+                    transaction_id=transaction_id,
+                    entry_type="reject"
+                )
+                results.append({
+                    "transaction_id": transaction_id,
+                    "status": "success",
+                    "message": f"HFR rejected - returning {float(remaining):,.2f} to fund"
+                })
+            else:
+                print(f"No remaining amount to return (fully used)")
+                results.append({
+                    "transaction_id": transaction_id,
+                    "status": "success",
+                    "message": "HFR rejected - hold was fully used, no amount to return"
+                })
+            return Response(
+                {
+                    "results": results
+                },
+            )
+              
+
+        except Exception as e:
+            return Response(
+                {"error": str(e)},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            )
