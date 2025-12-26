@@ -451,54 +451,15 @@ class TransactionTransferCreateView(APIView):
         user = request.user
         
         # SuperAdmin bypasses all security group checks
-        user_memberships = None
-        if user.role == 1:
-            user_approval_groups = None  # None = see all groups
-        else:
-            # Check if user has approval permissions
-            from user_management.models import XX_UserGroupMembership
-            
-            # Get user's security group memberships with approval access
-            # Check custom_abilities or role's default_abilities for 'APPROVE'
-            user_memberships = XX_UserGroupMembership.objects.filter(
-                user=user,
-                is_active=True
-            ).prefetch_related('assigned_roles')
-            
-            user_approval_groups = []
-            for membership in user_memberships:
-                # Check custom_abilities first
-                if membership.custom_abilities and 'TRANSFER' in membership.custom_abilities:
-                    user_approval_groups.append(membership.security_group_id)
-                    continue
-                
-                # Check role's default_abilities
-                for role in membership.assigned_roles.all():
-                    if role.is_active and role.default_abilities and 'TRANSFER' in role.default_abilities:
-                        user_approval_groups.append(membership.security_group_id)
-                        break
-            
-            if not user_approval_groups:
-                # User has no approval access in any security group
-                print(f"DEBUG: User {user.username} (ID: {user.id}) has no TRANSFER permissions")
-                print(f"DEBUG: User memberships: {user_memberships.count()}")
-                for membership in user_memberships:
-                    print(f"  - Group: {membership.security_group.group_name}")
-                    print(f"    Custom abilities: {membership.custom_abilities}")
-                    for role in membership.assigned_roles.all():
-                        print(f"    Role: {role.role.name}, Active: {role.is_active}, Abilities: {role.default_abilities}")
-                
-                return Response(
-                    {
-                        "success": False,
-                        "error": "ACCESS_DENIED",
-                        "status":rest_framework.status.HTTP_403_FORBIDDEN,
-                        "message": "You do not have approval permissions. Please contact your administrator to grant you approval access in a security group.",
-                        "details": "Your account is not assigned to any security group with approval permissions.",
-                        "results": []
-                    },
-                    status=status.HTTP_403_FORBIDDEN
-                )
+        from user_management.utils import get_user_security_group_ids_or_response
+
+        required_abilities = ("TRANSFER",)
+        user_approval_groups, user_memberships, access_response = (
+            get_user_security_group_ids_or_response(user, required_abilities)
+        )
+
+        if access_response is not None:
+            return access_response
 
 
 
@@ -682,55 +643,15 @@ class TransactionTransferListView(APIView):
         user = request.user
         
         # SuperAdmin bypasses all security group checks
-        user_memberships = None
-        if user.role == 1:
-            user_approval_groups = None  # None = see all groups
-        else:
-            # Check if user has approval permissions
-            from user_management.models import XX_UserGroupMembership
-            
-            # Get user's security group memberships with approval access
-            # Check custom_abilities or role's default_abilities for 'APPROVE'
-            user_memberships = XX_UserGroupMembership.objects.filter(
-                user=user,
-                is_active=True
-            ).prefetch_related('assigned_roles')
-            
-            user_approval_groups = []
-            for membership in user_memberships:
-                # Check custom_abilities first
-                if membership.custom_abilities and 'TRANSFER' in membership.custom_abilities:
-                    user_approval_groups.append(membership.security_group_id)
-                    continue
-                
-                # Check role's default_abilities
-                for role in membership.assigned_roles.all():
-                    if role.is_active and role.default_abilities and 'TRANSFER' in role.default_abilities:
-                        user_approval_groups.append(membership.security_group_id)
-                        break
-            
-            if not user_approval_groups:
-                # User has no approval access in any security group
-                print(f"DEBUG: User {user.username} (ID: {user.id}) has no TRANSFER permissions")
-                print(f"DEBUG: User memberships: {user_memberships.count()}")
-                for membership in user_memberships:
-                    print(f"  - Group: {membership.security_group.group_name}")
-                    print(f"    Custom abilities: {membership.custom_abilities}")
-                    for role in membership.assigned_roles.all():
-                        print(f"    Role: {role.role.name}, Active: {role.is_active}, Abilities: {role.default_abilities}")
-                # from rest_framework import status
-                return Response(
-                    {
-                        "success": False,
-                        "status":rest_framework.status.HTTP_403_FORBIDDEN,
-                        "error": "ACCESS_DENIED",
-                        "message": "You do not have approval permissions. Please contact your administrator to grant you approval access in a security group.",
-                        "details": "Your account is not assigned to any security group with approval permissions.",
-                        "results": []
-                        
-                    },
-                    status=rest_framework.status.HTTP_403_FORBIDDEN
-                )
+        from user_management.utils import get_user_security_group_ids_or_response
+
+        required_abilities = ("TRANSFER", "VIEW")
+        user_approval_groups, user_memberships, access_response = (
+            get_user_security_group_ids_or_response(user, required_abilities)
+        )
+
+        if access_response is not None:
+            return access_response
 
 
 
@@ -792,7 +713,7 @@ class TransactionTransferListView(APIView):
                         {
                             "error": "Access denied",
                             "message": f"This transaction is restricted to members of security group '{transaction_object.security_group.group_name}'",
-                            "security_group_id": transaction_object.security_group.group_id,
+                            "security_group_id": transaction_object.security_group.id,
                             "security_group_name": transaction_object.security_group.group_name
                         },
                         status=rest_framework.status.HTTP_403_FORBIDDEN,
@@ -1025,14 +946,16 @@ class TransactionTransferListView(APIView):
                         )
             elif is_distination > 0:
                 fund_ava,tot_budget = self._get_total_budget(segments_for_validation)
-                if tot_budget is None and fund_ava is None:
+                if tot_budget is None or fund_ava is None:
                     validation_errors.append(
                         "MOFA_COST_2 budget record not found for the provided segments"
                     )
-                elif float(to_center) + float(fund_ava) > float(tot_budget):
-                    validation_errors.append(
-                        f"اجمالى سيولة البند (السيولة المتاحة للبند المنقول إليه + القيمة المنقولة) اكبر من اجمالى موازنة تكاليف البند المنقول الية  برجاء إعادة التوزيع {float(tot_budget):,.1f} "
-                    )
+                else:
+                    to_center_value = float(to_center or 0)
+                    if to_center_value + float(fund_ava) > float(tot_budget):
+                        validation_errors.append(
+                            f"اجمالى سيولة البند (السيولة المتاحة للبند المنقول إليه + القيمة المنقولة) اكبر من اجمالى موازنة تكاليف البند المنقول الية  برجاء إعادة التوزيع {float(tot_budget):,.1f} "
+                        )
 
             # Add validation results to transfer data
             transfer_response = transfer_data.copy()
@@ -1126,21 +1049,23 @@ class TransactionTransferListView(APIView):
                 for value in to_center_values
             )
 
-            # Only update amount if balanced AND there are at least 2 transfers
-            # (single transfer can't be balanced since it only has from OR to, not both)
             transfer_count = all_related_transfers.count()
-            if transfer_count >= 2 and total_from_center == total_to_center and transaction_object.code[0:3] != "FAR":
-                transaction_object.amount = total_from_center
-                xx_BudgetTransfer.objects.filter(pk=transaction_id).update(
-                    amount=total_from_center
-                )
-            elif transaction_object.code[0:3] != "FAR":
+            is_far = transaction_object.code[0:3] == "FAR"
+            if is_far:
+                # FAR requires at least 2 transfers and balanced totals
+                if transfer_count >= 2 and total_from_center == total_to_center:
+                    transaction_object.amount = total_from_center
+                    xx_BudgetTransfer.objects.filter(pk=transaction_id).update(
+                        amount=total_from_center
+                    )
+            else:
+                # Other codes: use whichever side has a total
                 if total_from_center > 0:
                     transaction_object.amount = total_from_center
                 else:
                     transaction_object.amount = total_to_center
                 xx_BudgetTransfer.objects.filter(pk=transaction_id).update(
-                    amount=0
+                    amount=transaction_object.amount
                 )
 
             if transaction_object.code[0:3] == "AFR" or transaction_object.code[0:3] == "DFR" or transaction_object.code[0:3] == "HFR":

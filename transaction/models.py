@@ -18,19 +18,19 @@ class xx_TransactionTransfer(models.Model):
     cost_center_code = models.IntegerField(null=True, blank=True)
     cost_center_name = models.TextField(null=True, blank=True)  # Keep as TextField but avoid in complex queries
     done = models.IntegerField(default=1)
-    encumbrance = models.DecimalField(max_digits=15, decimal_places=2, null=True, blank=True)  # Changed from EncryptedTextField to DecimalField
-    actual = models.DecimalField(max_digits=15, decimal_places=2, null=True, blank=True)
-    approved_budget = models.DecimalField(max_digits=15, decimal_places=2, null=True, blank=True)  # Changed from EncryptedTextField to DecimalField
-    available_budget = models.DecimalField(max_digits=15, decimal_places=2, null=True, blank=True)  # Changed from EncryptedTextField to DecimalField
-    from_center = models.DecimalField(max_digits=15, decimal_places=2, null=True, blank=True)  # Changed from TextField to DecimalField
-    to_center = models.DecimalField(max_digits=15, decimal_places=2, null=True, blank=True)  # Changed from TextField to DecimalField
-    budget_adjustments = models.DecimalField(max_digits=15, decimal_places=2, null=True, blank=True, default=0)
-    commitments = models.DecimalField(max_digits=15, decimal_places=2, null=True, blank=True, default=0)
-    expenditures = models.DecimalField(max_digits=15, decimal_places=2, null=True, blank=True, default=0)
-    initial_budget = models.DecimalField(max_digits=15, decimal_places=2, null=True, blank=True)
-    obligations = models.DecimalField(max_digits=15, decimal_places=2, null=True, blank=True)
-    other_consumption = models.DecimalField(max_digits=15, decimal_places=2, null=True, blank=True, default=0)
-    total_budget = models.DecimalField(max_digits=15, decimal_places=2, null=True, blank=True)
+    encumbrance = models.DecimalField(max_digits=500, decimal_places=2, null=True, blank=True)  # Changed from EncryptedTextField to DecimalField
+    actual = models.DecimalField(max_digits=500, decimal_places=2, null=True, blank=True)
+    approved_budget = models.DecimalField(max_digits=500, decimal_places=2, null=True, blank=True)  # Changed from EncryptedTextField to DecimalField
+    available_budget = models.DecimalField(max_digits=500, decimal_places=2, null=True, blank=True)  # Changed from EncryptedTextField to DecimalField
+    from_center = models.DecimalField(max_digits=500, decimal_places=2, null=True, blank=True)  # Changed from TextField to DecimalField
+    to_center = models.DecimalField(max_digits=500, decimal_places=2, null=True, blank=True)  # Changed from TextField to DecimalField
+    budget_adjustments = models.DecimalField(max_digits=500, decimal_places=2, null=True, blank=True, default=0)
+    commitments = models.DecimalField(max_digits=500, decimal_places=2, null=True, blank=True, default=0)
+    expenditures = models.DecimalField(max_digits=500, decimal_places=2, null=True, blank=True, default=0)
+    initial_budget = models.DecimalField(max_digits=500, decimal_places=2, null=True, blank=True)
+    obligations = models.DecimalField(max_digits=500, decimal_places=2, null=True, blank=True)
+    other_consumption = models.DecimalField(max_digits=500, decimal_places=2, null=True, blank=True, default=0)
+    total_budget = models.DecimalField(max_digits=500, decimal_places=2, null=True, blank=True)
 
 
     file = models.FileField(upload_to="transfers/", null=True, blank=True)
