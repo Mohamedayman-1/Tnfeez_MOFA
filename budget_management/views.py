@@ -651,6 +651,8 @@ class ListBudgetTransferView(APIView):
                     total_used += far_total
                 
                 remaining = original_hold - total_used
+                if row.get("status_level") is not None and row["status_level"] < 1:
+                    remaining = Decimal('0.00')
                 
                 # Add HFR flags to the row
                 row["hfr_original_hold"] = float(original_hold)
@@ -2557,9 +2559,20 @@ class Transction_unhold_View(APIView):
         try:
 
             transaction_id = request.data.get("transaction_id",None)
-            if not transaction_id or not isinstance(transaction_id, list):
+            if not transaction_id:
                 return Response(
-                    {"error": "transaction_ids must be a non-empty list"},
+                    {"error": "transaction_id is required"},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+            transfer = xx_BudgetTransfer.objects.filter(transaction_id=transaction_id).first()
+            if not transfer:
+                return Response(
+                    {"error": "Transaction not found"},
+                    status=status.HTTP_404_NOT_FOUND,
+                )
+            if transfer.code and not transfer.code.startswith("HFR"):
+                return Response(
+                    {"error": "Only HFR transactions can be unheld"},
                     status=status.HTTP_400_BAD_REQUEST,
                 )
             results = []
@@ -2616,6 +2629,14 @@ class Transction_unhold_View(APIView):
                     "status": "success",
                     "message": "HFR rejected - hold was fully used, no amount to return"
                 })
+
+            # Mark HFR as rejected/unheld so remaining is treated as zero in listings
+            if transfer.status != "Un_Holded":
+                transfer.status = "Un_Holded"
+            if transfer.status_level is None or transfer.status_level >= 1:
+                transfer.status_level = 0
+            transfer.save(update_fields=["status", "status_level"])
+
             return Response(
                 {
                     "results": results
