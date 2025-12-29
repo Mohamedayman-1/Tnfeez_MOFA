@@ -1802,53 +1802,92 @@ class DashboardBudgetTransferView(APIView):
                     )
 
                     # Count by code prefix using database functions
-                    code_counts = transfers_queryset.aggregate(
-                        far=Count("transaction_id", filter=Q(code__istartswith="FAR")),
-                        afr=Count("transaction_id", filter=Q(code__istartswith="AFR")),
-                        fad=Count("transaction_id", filter=Q(code__istartswith="FAD")),
+                    type_status_counts = transfers_queryset.aggregate(
+                        far_total=Count("transaction_id", filter=Q(code__istartswith="FAR")),
+                        far_pending=Count("transaction_id", filter=Q(code__istartswith="FAR", status="pending")),
+                        far_approved=Count("transaction_id", filter=Q(code__istartswith="FAR", status="approved")),
+                        far_rejected=Count("transaction_id", filter=Q(code__istartswith="FAR", status="rejected")),
+                        afr_total=Count("transaction_id", filter=Q(code__istartswith="AFR")),
+                        afr_pending=Count("transaction_id", filter=Q(code__istartswith="AFR", status="pending")),
+                        afr_approved=Count("transaction_id", filter=Q(code__istartswith="AFR", status="approved")),
+                        afr_rejected=Count("transaction_id", filter=Q(code__istartswith="AFR", status="rejected")),
+                        dfr_total=Count("transaction_id", filter=Q(code__istartswith="DFR")),
+                        dfr_pending=Count("transaction_id", filter=Q(code__istartswith="DFR", status="pending")),
+                        dfr_approved=Count("transaction_id", filter=Q(code__istartswith="DFR", status="approved")),
+                        dfr_rejected=Count("transaction_id", filter=Q(code__istartswith="DFR", status="rejected")),
+                        hfr_total=Count("transaction_id", filter=Q(code__istartswith="HFR")),
+                        hfr_pending=Count("transaction_id", filter=Q(code__istartswith="HFR", status="pending")),
+                        hfr_approved=Count("transaction_id", filter=Q(code__istartswith="HFR", status="approved")),
+                        hfr_rejected=Count("transaction_id", filter=Q(code__istartswith="HFR", status="rejected")),
                     )
-
-                    # Get request dates efficiently (only non-null dates)
-                    request_dates = list(
-                        transfers_queryset.filter(request_date__isnull=False)
-                        .values_list("request_date", flat=True)
-                        .order_by("-request_date")[
-                            :1000
-                        ]  # Limit to recent 1000 for performance
-                    )
-
-                    # Convert datetime objects to ISO format strings for JSON serialization
-                    request_dates_iso = [date.isoformat() for date in request_dates]
-
-                    # NEW: Approval rate analysis (last vs current month)
-                    approval_rate_data = get_approval_rate_change(transfers_queryset)
 
                     print(
                         f"Database counting completed in {time.time() - count_start:.2f}s"
                     )
 
+                    # Build transaction id lists by type and status
+                    def ids_for(code_prefix, status_value=None):
+                        qs = transfers_queryset.filter(code__istartswith=code_prefix)
+                        if status_value:
+                            qs = qs.filter(status=status_value)
+                        return list(qs.values_list("transaction_id", flat=True))
+
                     # PHASE 2: Format response data
                     data = {
-                        "total_transfers": total_count,
-                        "total_transfers_far": code_counts["far"],
-                        "total_transfers_afr": code_counts["afr"],
-                        "total_transfers_fad": code_counts["fad"],
-                        "approved_transfers": status_counts["approved"],
-                        "rejected_transfers": status_counts["rejected"],
-                        "pending_transfers": status_counts["pending"],
-                        "pending_transfers_by_level": {
-                            "Level1": level_counts["level1"],
-                            "Level2": level_counts["level2"],
-                            "Level3": level_counts["level3"],
-                            "Level4": level_counts["level4"],
+                        "by_transfer_type": {
+                            "FAR": {
+                                "total_transfers": type_status_counts["far_total"],
+                                "pending_transfers": type_status_counts["far_pending"],
+                                "approved_transfers": type_status_counts["far_approved"],
+                                "rejected_transfers": type_status_counts["far_rejected"],
+                                "transaction_ids": {
+                                    "all": ids_for("FAR"),
+                                    "pending": ids_for("FAR", "pending"),
+                                    "approved": ids_for("FAR", "approved"),
+                                    "rejected": ids_for("FAR", "rejected"),
+                                },
+                            },
+                            "AFR": {
+                                "total_transfers": type_status_counts["afr_total"],
+                                "pending_transfers": type_status_counts["afr_pending"],
+                                "approved_transfers": type_status_counts["afr_approved"],
+                                "rejected_transfers": type_status_counts["afr_rejected"],
+                                "transaction_ids": {
+                                    "all": ids_for("AFR"),
+                                    "pending": ids_for("AFR", "pending"),
+                                    "approved": ids_for("AFR", "approved"),
+                                    "rejected": ids_for("AFR", "rejected"),
+                                },
+                            },
+                            "DFR": {
+                                "total_transfers": type_status_counts["dfr_total"],
+                                "pending_transfers": type_status_counts["dfr_pending"],
+                                "approved_transfers": type_status_counts["dfr_approved"],
+                                "rejected_transfers": type_status_counts["dfr_rejected"],
+                                "transaction_ids": {
+                                    "all": ids_for("DFR"),
+                                    "pending": ids_for("DFR", "pending"),
+                                    "approved": ids_for("DFR", "approved"),
+                                    "rejected": ids_for("DFR", "rejected"),
+                                },
+                            },
+                            "HFR": {
+                                "total_transfers": type_status_counts["hfr_total"],
+                                "pending_transfers": type_status_counts["hfr_pending"],
+                                "approved_transfers": type_status_counts["hfr_approved"],
+                                "rejected_transfers": type_status_counts["hfr_rejected"],
+                                "transaction_ids": {
+                                    "all": ids_for("HFR"),
+                                    "pending": ids_for("HFR", "pending"),
+                                    "approved": ids_for("HFR", "approved"),
+                                    "rejected": ids_for("HFR", "rejected"),
+                                },
+                            },
                         },
-                        "request_dates": request_dates_iso,
-                        "approval_rate_analysis": approval_rate_data,
                         "performance_metrics": {
                             "total_processing_time": round(time.time() - start_time, 2),
                             "counting_time": round(time.time() - count_start, 2),
                             "total_records_processed": total_count,
-                            "request_dates_retrieved": len(request_dates_iso),
                         },
                     }
 
@@ -1981,15 +2020,6 @@ class DashboardBudgetTransferView(APIView):
                         "all_combinations": all_combinations,
                         "applied_filters": {
                             "cost_center_code": DashBoard_filler_per_Project,
-                        },
-                        "performance_metrics": {
-                            "total_processing_time": round(time.time() - start_time, 2),
-                            "aggregation_time": round(
-                                time.time() - aggregation_start, 2
-                            ),
-                            "cost_center_groups": len(cost_center_totals),
-                            "account_code_groups": len(account_code_totals),
-                            "total_combinations": len(all_combinations),
                         },
                     }
 
