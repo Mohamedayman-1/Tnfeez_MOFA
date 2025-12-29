@@ -697,6 +697,7 @@ class ListBudgetTransfer_approvels_View(APIView):
         date = request.data.get("date", None)
         start_date = request.data.get("start_date", None)
         end_date = request.data.get("end_date", None)
+        search = request.query_params.get("search", None)
         status_filter = request.query_params.get("status", None)
 
         if code is None:
@@ -757,6 +758,24 @@ class ListBudgetTransfer_approvels_View(APIView):
         
         # Initialize combined data list
         all_data = []
+        
+        def apply_search_filter(queryset, search_value):
+            if not search_value:
+                return queryset
+            s = str(search_value).strip()
+            query = (
+                Q(code__icontains=s)
+                | Q(requested_by__icontains=s)
+                | Q(status__icontains=s)
+                | Q(transaction_date__icontains=s)
+                | Q(type__icontains=s)
+            )
+            if s.isdigit():
+                try:
+                    query |= Q(transaction_id=int(s))
+                except Exception:
+                    pass
+            return queryset.filter(query)
         
         # If status filter is "pending" or None, include pending transfers
         if status_filter in [None, "pending"]:
@@ -824,6 +843,8 @@ class ListBudgetTransfer_approvels_View(APIView):
 
             if code:
                 pending_transfers = pending_transfers.filter(code__icontains=code)
+            
+            pending_transfers = apply_search_filter(pending_transfers, search)
 
             pending_transfers = pending_transfers.order_by("-request_date")
 
@@ -915,6 +936,8 @@ class ListBudgetTransfer_approvels_View(APIView):
 
             if code:
                 history_transfers = history_transfers.filter(code__icontains=code)
+            
+            history_transfers = apply_search_filter(history_transfers, search)
 
             history_transfers = history_transfers.order_by("-request_date")
 
@@ -2257,7 +2280,6 @@ class Approval_Status(APIView):
                     ),
                     "name": stpl.name,
                     "decision_policy": stpl.decision_policy,
-                    "reason": None,
                 }
 
                 # Determine status for this stage
@@ -2298,7 +2320,6 @@ class Approval_Status(APIView):
                             ),
                         }
                         stage_info["comment"] = last_reject.comment
-                        stage_info["reason"] = last_reject.comment
                     else:
                         # If workflow is rejected and another parallel stage in this order was rejected,
                         # mark this stage as rejected to reflect the group outcome.
@@ -2318,7 +2339,6 @@ class Approval_Status(APIView):
                                 ),
                             }
                             stage_info["comment"] = group_reject.comment
-                            stage_info["reason"] = group_reject.comment
                             results.append(stage_info)
                             continue
                         # Approved if there is at least one approve action (user or system auto-skip approve)
@@ -2342,7 +2362,6 @@ class Approval_Status(APIView):
                                 ),
                             }
                             stage_info["comment"] = last_approve.comment
-                            stage_info["reason"] = last_approve.comment
                 else:
                     # Fallback
                     stage_info["status"] = inst_status
