@@ -2257,6 +2257,7 @@ class Approval_Status(APIView):
                     ),
                     "name": stpl.name,
                     "decision_policy": stpl.decision_policy,
+                    "reason": None,
                 }
 
                 # Determine status for this stage
@@ -2297,6 +2298,7 @@ class Approval_Status(APIView):
                             ),
                         }
                         stage_info["comment"] = last_reject.comment
+                        stage_info["reason"] = last_reject.comment
                     else:
                         # If workflow is rejected and another parallel stage in this order was rejected,
                         # mark this stage as rejected to reflect the group outcome.
@@ -2316,6 +2318,7 @@ class Approval_Status(APIView):
                                 ),
                             }
                             stage_info["comment"] = group_reject.comment
+                            stage_info["reason"] = group_reject.comment
                             results.append(stage_info)
                             continue
                         # Approved if there is at least one approve action (user or system auto-skip approve)
@@ -2339,6 +2342,7 @@ class Approval_Status(APIView):
                                 ),
                             }
                             stage_info["comment"] = last_approve.comment
+                            stage_info["reason"] = last_approve.comment
                 else:
                     # Fallback
                     stage_info["status"] = inst_status
