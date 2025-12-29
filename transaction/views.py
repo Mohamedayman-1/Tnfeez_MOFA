@@ -722,34 +722,51 @@ class TransactionTransferListView(APIView):
             # No security group restriction - accessible to all authenticated users
             access_source = 'no_restriction'
           
-        status = False
-        if transaction_object.code[0:3] != "FAD":
-
-            if transaction_object.status_level and transaction_object.status_level < 1:
-                status = "is rejected"
-            elif (
-                transaction_object.status_level and transaction_object.status_level == 1
-            ):
-                status = "not yet sent for approval"
-            elif (
-                transaction_object.status_level and transaction_object.status_level == 4
-            ):
+        status = None
+        workflow_status = getattr(transaction_object, "status", None)
+        if workflow_status:
+            if workflow_status == "rejected":
+                status = "rejected"
+            elif workflow_status == "approved":
                 status = "approved"
-            else:
+            elif workflow_status in ["pending", "submitted", "in_progress", "cancelled"]:
                 status = "waiting for approval"
-        else:
-            if transaction_object.status_level and transaction_object.status_level < 1:
-                status = "is rejected"
-            elif (
-                transaction_object.status_level and transaction_object.status_level == 3
-            ):
-                status = "approved"
-            elif (
-                transaction_object.status_level and transaction_object.status_level == 1
-            ):
-                status = "not yet sent for approval"
+        if status is None:
+            if transaction_object.code[0:3] != "FAD":
+                if transaction_object.status_level and transaction_object.status_level < 1:
+                    status = "rejected"
+                elif (
+                    transaction_object.status_level
+                    and transaction_object.status_level == 1
+                ):
+                    status = "not yet sent for approval"
+                elif (
+                    transaction_object.status_level
+                    and transaction_object.status_level == 4
+                ):
+                    status = "approved"
+                else:
+                    status = "waiting for approval"
             else:
-                status = "waiting for approval"
+                if transaction_object.status_level and transaction_object.status_level < 1:
+                    status = "rejected"
+                elif (
+                    transaction_object.status_level
+                    and transaction_object.status_level == 3
+                ):
+                    status = "approved"
+                elif (
+                    transaction_object.status_level
+                    and transaction_object.status_level == 1
+                ):
+                    status = "not yet sent for approval"
+                else:
+                    status = "waiting for approval"
+        elif (
+            workflow_status in ["pending", "submitted", "in_progress"]
+            and transaction_object.status_level == 1
+        ):
+            status = "not yet sent for approval"
 
         transfers = xx_TransactionTransfer.objects.filter(transaction=transaction_id)
         budget=xx_BudgetTransfer.objects.get(transaction_id=transaction_id)
