@@ -11,16 +11,18 @@ import requests
 from typing import Dict, Optional
 from dotenv import load_dotenv
 from django.utils import timezone
+from user_management.models import XX_UserGroupMembership, xx_notification
+from __NOTIFICATIONS_SETUP__.code.task_notifications import (
+    send_upload_completed,
+    send_upload_started,
+)
 from account_and_entitys.models import XX_Segment_Funds
 from account_and_entitys.oracle.oracle_balance_report_manager import OracleBalanceReportManager
 from budget_management.models import xx_budget_integration_audit, xx_BudgetTransfer
-#from test_upload_fbdi.budget_import_flow import submit_budget_import
 
-# Import notification functions from centralized location - REMOVED
-# from __NOTIFICATIONS_SETUP__.code.task_notifications import (
-#     set_notification_user,
-#     send_workflow_notification
-# )
+
+from user_management.utils import get_active_user_ids_for_security_group
+
 
 load_dotenv()
 
@@ -394,9 +396,26 @@ def run_complete_workflow(file_path: str, Groupid: Optional[int] = None, transac
         print("\n" + "="*60)
         print("STEP 1: Uploading file to UCM")
         print("="*60)
-        
+
 
         
+        group_id = getattr(transaction_obj, "security_group_id", None)
+        if group_id:
+            user_ids = get_active_user_ids_for_security_group(group_id)
+            for uid in user_ids:
+                xx_notification.objects.create(
+                    user_id=uid,
+                    message=(
+                        f"Starting budget upload workflow for transaction {transaction_id}"
+                    ),
+                )
+                send_upload_started(
+                    uid,
+                    transaction_id,
+                    message=(
+                        f"Starting budget upload workflow for transaction {transaction_id}"
+                    ),
+                )
         audit_ucm = xx_budget_integration_audit.objects.create(
             transaction_id=transaction_obj,
             step_name="Journal Upload to UCM",
@@ -531,6 +550,7 @@ def run_complete_workflow(file_path: str, Groupid: Optional[int] = None, transac
         workflow_results["message"] = "All steps completed successfully"
         print(f"\n✓✓✓ ALL STEPS COMPLETED SUCCESSFULLY! ✓✓✓")
 
+
         print("Refreshing fund values...")
         period_name = "1-25"
        
@@ -552,7 +572,22 @@ def run_complete_workflow(file_path: str, Groupid: Optional[int] = None, transac
                 print("Refreshing the Fund data is Failed for control budget:",control_budget_name)
 
 
-        
+        if group_id:
+            user_ids = get_active_user_ids_for_security_group(group_id)
+            for uid in user_ids:
+                xx_notification.objects.create(
+                    user_id=uid,
+                    message=(
+                        f"Starting budget upload workflow for transaction {transaction_id}"
+                    ),
+                )
+                send_upload_completed(
+                    uid,
+                    transaction_id,
+                    message=(
+                        f"Budget upload workflow completed for transaction {transaction_id}"
+                    ),
+                )
         return workflow_results
         
     except Exception as e:

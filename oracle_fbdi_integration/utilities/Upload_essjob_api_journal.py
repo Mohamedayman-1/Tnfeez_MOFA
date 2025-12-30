@@ -19,6 +19,12 @@ from account_and_entitys.oracle.oracle_balance_report_manager import OracleBalan
 #     set_notification_user,
 #     send_workflow_notification
 # )
+from __NOTIFICATIONS_SETUP__.code.task_notifications import (
+    send_upload_completed,
+    send_upload_started,
+)
+from user_management.models import xx_notification
+from user_management.utils import get_active_user_ids_for_security_group
 
 load_dotenv()
 
@@ -368,7 +374,23 @@ def run_complete_workflow(file_path: str, Groupid: Optional[int] = None, transac
         print("="*60)
         
 
-        
+        group_id = getattr(transaction_obj, "security_group_id", None)
+        if group_id:
+            user_ids = get_active_user_ids_for_security_group(group_id)
+            for uid in user_ids:
+                xx_notification.objects.create(
+                    user_id=uid,
+                    message=(
+                        f"Starting journal upload workflow for transaction {transaction_id}"
+                    ),
+                )
+                send_upload_started(
+                    uid,
+                    transaction_id,
+                    message=(
+                        f"Starting journal upload workflow for transaction {transaction_id}"
+                    ),
+                )
         audit_ucm = xx_budget_integration_audit.objects.create(
             transaction_id=transaction_obj,
             step_name="Journal Upload to UCM",
@@ -564,7 +586,22 @@ def run_complete_workflow(file_path: str, Groupid: Optional[int] = None, transac
 
         
 
-        
+        if group_id:
+            user_ids = get_active_user_ids_for_security_group(group_id)
+            for uid in user_ids:
+                xx_notification.objects.create(
+                    user_id=uid,
+                    message=(
+                        f"Journal upload workflow completed for transaction {transaction_id}"
+                    ),
+                )
+                send_upload_completed(
+                    uid,
+                    transaction_id,
+                    message=(
+                        f"Journal upload workflow completed for transaction {transaction_id}"
+                    ),
+                )
         return workflow_results
         
     except Exception as e:

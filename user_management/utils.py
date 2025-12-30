@@ -120,3 +120,15 @@ def get_user_security_group_ids_or_response(
         return group_ids, memberships, response
 
     return group_ids, memberships, None
+
+
+def get_active_user_ids_for_security_group(security_group_id):
+    """
+    Return a list of active user IDs for a given security group.
+    """
+    return list(
+        XX_UserGroupMembership.objects.filter(
+            security_group_id=security_group_id,
+            is_active=True,
+        ).values_list("user_id", flat=True)
+    )

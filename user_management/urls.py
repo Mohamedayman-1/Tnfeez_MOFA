@@ -2,6 +2,15 @@ from django.urls import path
 from .views import ChangePasswordView, LogoutView, RegisterView, LoginView, TokenExpiredView, ListUsersView, UpdateUserPermissionView, UserAbilitiesView, UserLevelListView, UserLevelCreateView, UpdateUserLevelView, UserProjectsView, UserUpdateView, UserDeleteView, UserLevelUpdateView, UserLevelDeleteView,RefreshTokenView
 from rest_framework_simplejwt.views import TokenRefreshView
 
+
+
+
+from .views import(
+
+      UnRead_Notification, System_Notification, Get_All_Notification, Read_Notification, Read_All_Notification, Delete_Nnotification
+
+
+)
 # Phase 4 imports - Dynamic Segment Access Control
 from .phase4_views import (
     UserSegmentAccessListView,
@@ -174,32 +183,34 @@ urlpatterns = [
     # path("chatbot/bot/", testChatbot.as_view(), name="chatbot"),
     # Notification management endpoints
     #
-    # path(
-    #     "Notifications/unread",
-    #     UnRead_Notification.as_view(),
-    #     name="unread-notifications",
-    # ),
-    # path(
-    #     "Notifications/system",
-    #     System_Notification.as_view(),
-    #     name="system-notifications",
-    # ),
-    # path(
-    #     "Notifications/get_all",
-    #     Get_All_Notification.as_view(),
-    #     name="all-notifications",
-    # ),
-    # path(
-    #     "Notifications/read_one", Read_Notification.as_view(), name="read-notification"
-    # ),
-    # path(
-    #     "Notifications/read_all",
-    #     Read_All_Notification.as_view(),
-    #     name="read-all-notifications",
-    # ),
-    # path(
-    #     "Notifications/delete",
-    #     Delete_Nnotification.as_view(),
-    #     name="delete-notification",
-    # ),
+     path(
+         "Notifications/unread",
+         UnRead_Notification.as_view(),
+         name="unread-notifications",
+     ),
+     path(
+         "Notifications/system",
+         System_Notification.as_view(),
+         name="system-notifications",
+     ),
+     path(
+         "Notifications/get_all",
+         Get_All_Notification.as_view(),
+         name="all-notifications",
+     ),
+     path(
+         "Notifications/read_one", Read_Notification.as_view(), name="read-notification"
+     ),
+     path(
+         "Notifications/read_all",
+         Read_All_Notification.as_view(),
+         name="read-all-notifications",
+     ),
+     path(
+         "Notifications/delete",
+         Delete_Nnotification.as_view(),
+         name="delete-notification",
+     ),
+
+     
 ]
