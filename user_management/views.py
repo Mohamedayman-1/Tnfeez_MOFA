@@ -609,7 +609,7 @@ class System_Notification(APIView):
 class Get_All_Notification(APIView):
     """Create and list system notifications for all users"""
 
-    permission_classes = [IsAuthenticated, IsAdmin]
+    permission_classes = [IsAuthenticated]
 
     def get(self, request):
         user = request.user
@@ -677,7 +677,7 @@ class Delete_Nnotification(APIView):
 
     permission_classes = [IsAuthenticated]
 
-    def put(self, request):
+    def delete(self, request):
         try:
             notification_id = request.query_params.get("notification_id")
             notification = xx_notification.objects.get(

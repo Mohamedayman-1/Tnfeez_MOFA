@@ -7,7 +7,8 @@ from django.contrib.auth import get_user_model
 from django.core.exceptions import ObjectDoesNotExist
 
 from budget_management.models import xx_BudgetTransfer
-from user_management.models import xx_User, xx_UserLevel
+from user_management.models import xx_User, xx_UserLevel, xx_notification
+from __NOTIFICATIONS_SETUP__.code.task_notifications import send_generic_message
 from .models import (
     ApprovalWorkflowTemplate,
     ApprovalWorkflowStageTemplate,
@@ -853,6 +854,40 @@ class ApprovalManager:
                 triggers_stage_completion=False,
             )
 
+            workflow_instance = stage_instance.workflow_instance
+            budget_transfer = getattr(workflow_instance, "budget_transfer", None)
+            if budget_transfer:
+                stage_name = getattr(stage_instance.stage_template, "name", "Stage")
+                delegate_message = (
+                    f"Stage {stage_name} delegated to {to_user} for transaction {budget_transfer.transaction_id}"
+                )
+                assignment_user_ids = workflow_instance.stage_instances.values_list(
+                    "assignments__user_id",
+                    flat=True,
+                )
+                recipient_ids = {uid for uid in assignment_user_ids if uid}
+                if getattr(budget_transfer, "user_id", None):
+                    recipient_ids.add(budget_transfer.user_id)
+
+                for user_id in recipient_ids:
+                    xx_notification.objects.create(
+                        user_id=user_id,
+                        Transaction_id=budget_transfer.transaction_id,
+                        type_of_Trasnction=budget_transfer.type,
+                        Type_of_action="Approvel",
+                        message=delegate_message,
+                    )
+                    send_generic_message(
+                        user_id,
+                        message=delegate_message,
+                        data={
+                            "transaction_id": budget_transfer.transaction_id,
+                            "status": "delegated",
+                            "stage": stage_name,
+                            "code": budget_transfer.code,
+                        },
+                    )
+
         return delegation
 
     # ----------------------
@@ -1042,7 +1077,60 @@ class ApprovalManager:
         """
         Hook: called when a stage is completed.
         """
-        pass
+        budget_transfer = getattr(stage_instance.workflow_instance, "budget_transfer", None)
+        if not budget_transfer:
+            return
+
+        last_action = (
+            stage_instance.actions.filter(
+                action__in=[
+                    ApprovalAction.ACTION_APPROVE,
+                    ApprovalAction.ACTION_REJECT,
+                ]
+            )
+            .order_by("-created_at")
+            .first()
+        )
+        if not last_action:
+            return
+
+        status_label = (
+            "approved"
+            if last_action.action == ApprovalAction.ACTION_APPROVE
+            else "rejected"
+        )
+        stage_name = getattr(stage_instance.stage_template, "name", "Stage")
+        message = (
+            f"Stage {stage_name} {status_label} for transaction {budget_transfer.transaction_id}"
+        )
+
+        workflow_instance = stage_instance.workflow_instance
+        assignment_user_ids = workflow_instance.stage_instances.values_list(
+            "assignments__user_id",
+            flat=True,
+        )
+        recipient_ids = {uid for uid in assignment_user_ids if uid}
+        if getattr(budget_transfer, "user_id", None):
+            recipient_ids.add(budget_transfer.user_id)
+
+        for user_id in recipient_ids:
+            xx_notification.objects.create(
+                user_id=user_id,
+                Transaction_id=budget_transfer.transaction_id,
+                type_of_Trasnction=budget_transfer.type,
+                Type_of_action="Approvel",
+                message=message,
+            )
+            send_generic_message(
+                user_id,
+                message=message,
+                data={
+                    "transaction_id": budget_transfer.transaction_id,
+                    "status": status_label,
+                    "stage": stage_name,
+                    "code": budget_transfer.code,
+                },
+            )
 
     @staticmethod
     def on_stage_skipped(stage_instance: ApprovalWorkflowStageInstance):

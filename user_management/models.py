@@ -683,6 +683,9 @@ class xx_notification(models.Model):
     created_at = models.DateTimeField(auto_now_add=True)
     is_system_read = models.BooleanField(default=False)  # For tracking if the notification was read on the OS system
     is_shown = models.BooleanField(default=True)  # For tracking if the notification was shown to the user
+    type_of_Trasnction = models.CharField(max_length=50, null=True, blank=True)
+    Type_of_action = models.CharField(max_length=50, null=True, blank=True)
+    Transaction_id = models.IntegerField(null=True, blank=True)
 
     class Meta:
         db_table = 'XX_NOTIFICATION_XX'

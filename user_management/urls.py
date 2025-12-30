@@ -194,7 +194,7 @@ urlpatterns = [
          name="system-notifications",
      ),
      path(
-         "Notifications/get_all",
+         "Notifications/",
          Get_All_Notification.as_view(),
          name="all-notifications",
      ),

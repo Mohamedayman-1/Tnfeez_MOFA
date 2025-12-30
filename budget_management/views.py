@@ -311,11 +311,14 @@ class CreateBudgetTransferView(APIView):
             Notification_object = xx_notification.objects.create(
                 user_id=request.user.id,
                 message=f"New budget transfer request created with code {new_code}",
+                type_of_Trasnction=transfer.type,
+                Transaction_id=transfer.transaction_id,
+                Type_of_action="List"
             )
             Notification_object.save()
             send_generic_message(
                 request.user.id,
-                f"New budget transfer request created with code {new_code}",
+                message=f"New budget transfer request created with code {new_code}",
                 data={
                     "transaction_id": transfer.transaction_id,
                     "code": new_code,

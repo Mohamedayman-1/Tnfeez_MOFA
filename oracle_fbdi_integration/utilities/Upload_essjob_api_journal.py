@@ -380,6 +380,9 @@ def run_complete_workflow(file_path: str, Groupid: Optional[int] = None, transac
             for uid in user_ids:
                 xx_notification.objects.create(
                     user_id=uid,
+                    Transaction_id=transaction_obj.transaction_id,
+                    type_of_Trasnction=transaction_obj.type,
+                    Type_of_action="List",
                     message=(
                         f"Starting journal upload workflow for transaction {transaction_id}"
                     ),
@@ -591,6 +594,9 @@ def run_complete_workflow(file_path: str, Groupid: Optional[int] = None, transac
             for uid in user_ids:
                 xx_notification.objects.create(
                     user_id=uid,
+                    Transaction_id=transaction_obj.transaction_id,
+                    type_of_Trasnction=transaction_obj.type,
+                    Type_of_action="List",
                     message=(
                         f"Journal upload workflow completed for transaction {transaction_id}"
                     ),
