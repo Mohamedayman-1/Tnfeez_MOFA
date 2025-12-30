@@ -343,12 +343,16 @@ class ListBudgetTransferView(APIView):
 
     def get(self, request):
         status_type = request.query_params.get("status_type", None)
+        status_filter = request.query_params.get("status", None)
+        user_id_filter = request.query_params.get("user_id", None)
         search = request.query_params.get("search")
         day = request.query_params.get("day")
         month = request.query_params.get("month")
         year = request.query_params.get("year")
         sdate = request.query_params.get("start_date")
         edate = request.query_params.get("end_date")
+        user_id = request.query_params.get("user_id", None)
+        status = request.query_params.get("status", None)
         code = request.query_params.get("code", None)
 
         # ====== SECURITY GROUP FILTERING ======
@@ -423,6 +427,43 @@ class ListBudgetTransferView(APIView):
                 )
             else:
                 transfers = transfers.filter(status=status_type)
+
+        # Annotate active workflow status early so filters can use it.
+        from django.db.models import Subquery, OuterRef
+        active_workflow_status = ApprovalWorkflowInstance.objects.filter(
+            budget_transfer_id=OuterRef("transaction_id"),
+            status__in=["pending", "in_progress"],
+        ).order_by("execution_order").values("status")[:1]
+
+        transfers = transfers.annotate(
+            workflow_status=Coalesce(Subquery(active_workflow_status), F("status"))
+        )
+
+        if status_filter:
+            status_map = {
+                "pending": "pending",
+                "in_progress": "in_progress",
+                "approved": "approved",
+                "rejected": "rejected",
+                "un_holded": "Un_Holded",
+            }
+            raw_statuses = [s.strip() for s in status_filter.split(",") if s.strip()]
+            normalized = [
+                status_map[s.lower()]
+                for s in raw_statuses
+                if s.lower() in status_map
+            ]
+            if normalized:
+                transfers = transfers.filter(workflow_status__in=normalized)
+
+        if user_id_filter:
+            user_ids = [
+                uid.strip()
+                for uid in str(user_id_filter).split(",")
+                if uid.strip()
+            ]
+            if user_ids:
+                transfers = transfers.filter(user_id__in=user_ids)
         # print(type(code))
 
         if code:
@@ -524,20 +565,6 @@ class ListBudgetTransferView(APIView):
 
         # Use only safe fields for ordering to avoid Oracle NCLOB issues
         transfers = transfers.order_by("-transaction_id")
-
-        # Ensure we return the workflow instance status (if any) in the `status` column.
-        # If no workflow instance exists, fall back to the transfer's own status.
-        # Phase 6: Get active workflow (lowest execution_order with active status)
-        # Annotate under a different name to avoid conflict with the model's `status` field
-        from django.db.models import Subquery, OuterRef
-        active_workflow_status = ApprovalWorkflowInstance.objects.filter(
-            budget_transfer_id=OuterRef('transaction_id'),
-            status__in=['pending', 'in_progress']
-        ).order_by('execution_order').values('status')[:1]
-        
-        transfers = transfers.annotate(
-            workflow_status=Coalesce(Subquery(active_workflow_status), F("status"))
-        )
 
         # Convert to list to avoid lazy evaluation issues with Oracle
         # Exclude TextField columns that become NCLOB in Oracle
