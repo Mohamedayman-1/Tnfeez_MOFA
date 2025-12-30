@@ -329,6 +329,7 @@ class UserProfileSimpleView(APIView):
             roles = list(membership.assigned_roles.values_list('role__name', flat=True))
             groups.append({
                 "group_name": membership.security_group.group_name,
+                "group_id": membership.security_group.id,
                 "roles": roles,
                 "abilities": membership.get_effective_abilities()
             })

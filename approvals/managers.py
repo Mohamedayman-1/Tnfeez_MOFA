@@ -859,7 +859,7 @@ class ApprovalManager:
             if budget_transfer:
                 stage_name = getattr(stage_instance.stage_template, "name", "Stage")
                 delegate_message = (
-                    f"Stage {stage_name} delegated to {to_user} for transaction {budget_transfer.transaction_id}"
+                    f"Stage {stage_name} delegated to {to_user} for transaction {budget_transfer.code}"
                 )
                 assignment_user_ids = workflow_instance.stage_instances.values_list(
                     "assignments__user_id",
@@ -874,7 +874,7 @@ class ApprovalManager:
                         user_id=user_id,
                         Transaction_id=budget_transfer.transaction_id,
                         type_of_Trasnction=budget_transfer.type,
-                        Type_of_action="Approvel",
+                        Type_of_action="Approval",
                         message=delegate_message,
                     )
                     send_generic_message(
@@ -1101,7 +1101,7 @@ class ApprovalManager:
         )
         stage_name = getattr(stage_instance.stage_template, "name", "Stage")
         message = (
-            f"Stage {stage_name} {status_label} for transaction {budget_transfer.transaction_id}"
+            f"Stage {stage_name} {status_label} for transaction {budget_transfer.code}"
         )
 
         workflow_instance = stage_instance.workflow_instance
@@ -1118,7 +1118,7 @@ class ApprovalManager:
                 user_id=user_id,
                 Transaction_id=budget_transfer.transaction_id,
                 type_of_Trasnction=budget_transfer.type,
-                Type_of_action="Approvel",
+                Type_of_action="Approval",
                 message=message,
             )
             send_generic_message(

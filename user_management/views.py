@@ -626,6 +626,9 @@ class Get_All_Notification(APIView):
                 "created_at": notification.created_at,
                 "is_shown": notification.is_shown,
                 "is_system_read": notification.is_system_read,
+                "Transaction_id": notification.Transaction_id,
+                "type_of_Trasnction": notification.type_of_Trasnction,
+                "Type_of_action": notification.Type_of_action,
             }
             for notification in notifications
         ]

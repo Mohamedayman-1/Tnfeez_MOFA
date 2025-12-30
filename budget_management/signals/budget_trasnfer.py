@@ -7,9 +7,10 @@ from django.db.models.signals import post_save, pre_save, post_delete, pre_delet
 from django.dispatch import receiver
 from django.utils import timezone
 
-from approvals.managers import ApprovalManager
+from approvals.managers import ApprovalManager, ARCHIVED_STAGE_ORDER_INDEX_START
+from __NOTIFICATIONS_SETUP__.code.task_notifications import send_generic_message
 from ..models import xx_BudgetTransfer
-from user_management.models import xx_notification
+from user_management.models import xx_notification, XX_UserGroupMembership
 import logging
 from budget_transfer.global_function.dashbaord import dashboard_smart, dashboard_normal
 from transaction.models import xx_TransactionTransfer
@@ -125,6 +126,62 @@ def create_workflow_instance(sender, instance, created, **kwargs):
                 instance.save(update_fields=["status"])
                 # Note: This will silently fail. Consider raising ValidationError in the view instead.
                 return
+
+            recipient_ids = set()
+            try:
+                workflows = instance.workflow_instances.select_related("template").all()
+                for workflow in workflows:
+                    stages = workflow.template.stages.filter(
+                        order_index__lt=ARCHIVED_STAGE_ORDER_INDEX_START
+                    )
+                    for stage in stages:
+                        if stage.required_role:
+                            role_group = stage.required_role.security_group
+                            member_ids = (
+                                XX_UserGroupMembership.objects.filter(
+                                    security_group=role_group,
+                                    is_active=True,
+                                    assigned_roles=stage.required_role,
+                                ).values_list("user_id", flat=True)
+                            )
+                        else:
+                            member_ids = (
+                                XX_UserGroupMembership.objects.filter(
+                                    security_group=instance.security_group,
+                                    is_active=True,
+                                ).values_list("user_id", flat=True)
+                            )
+                        recipient_ids.update(member_ids)
+            except Exception as e:
+                logger.error(
+                    f"Error collecting approval recipients for transfer {instance.transaction_id}: {str(e)}"
+                )
+
+            if getattr(instance, "user_id", None):
+                recipient_ids.add(instance.user_id)
+
+            if recipient_ids:
+                message = (
+                    f"Transaction {instance.code} submitted for approval"
+                )
+                for user_id in recipient_ids:
+                    action_type = "List" if user_id == instance.user_id else "Approval"
+                    xx_notification.objects.create(
+                        user_id=user_id,
+                        Transaction_id=instance.transaction_id,
+                        type_of_Trasnction=instance.type,
+                        Type_of_action=action_type,
+                        message=message,
+                    )
+                    send_generic_message(
+                        user_id,
+                        message=message,
+                        data={
+                            "transaction_id": instance.transaction_id,
+                            "status": "submitted",
+                            "code": instance.code,
+                        },
+                    )
 
             instance.status = "pending"
             instance.save(update_fields=["status"])
