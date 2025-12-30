@@ -70,6 +70,7 @@ from rest_framework.permissions import IsAuthenticated
 
 from budget_management.models import xx_BudgetTransfer
 from budget_management.serializers import BudgetTransferSerializer
+from __NOTIFICATIONS_SETUP__.code.task_notifications import send_generic_message
 
 # Initialize logger
 logger = logging.getLogger(__name__)
@@ -312,6 +313,14 @@ class CreateBudgetTransferView(APIView):
                 message=f"New budget transfer request created with code {new_code}",
             )
             Notification_object.save()
+            send_generic_message(
+                request.user.id,
+                f"New budget transfer request created with code {new_code}",
+                data={
+                    "transaction_id": transfer.transaction_id,
+                    "code": new_code,
+                },
+            )
             return Response(
                 {
                     "message": "Budget transfer request created successfully.",
@@ -338,14 +347,12 @@ class ListBudgetTransferView(APIView):
         sdate = request.query_params.get("start_date")
         edate = request.query_params.get("end_date")
         code = request.query_params.get("code", None)
-        print( f"code value: {code} ({type(code)})")
 
         # ====== SECURITY GROUP FILTERING ======
         user = request.user
         
         # SuperAdmin bypasses all security group checks
         user_memberships = None
-        print(user.role)
         if user.role == "superadmin":
             user_approval_groups = None  # None = see all groups
         else:

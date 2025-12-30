@@ -26,7 +26,7 @@ ALLOWED_HOSTS = [
 
 # Application definition
 INSTALLED_APPS = [
-    # "daphne",  # Disabled - using WSGI instead of ASGI
+    "daphne",  # ASGI server for Channels/WebSockets
     "django.contrib.admin",
     "django.contrib.auth",
     "django.contrib.admindocs",
@@ -36,7 +36,7 @@ INSTALLED_APPS = [
     "django.contrib.staticfiles",
     "rest_framework",
     "rest_framework_simplejwt",
-    # "channels",  # Disabled - no WebSocket notifications
+    "channels",  # Django Channels for WebSocket notifications
     "corsheaders",
     "user_management",
     "budget_management.apps.BudgetManagementConfig",
@@ -62,15 +62,14 @@ REST_FRAMEWORK = {
 }
 
 
-# CHANNEL_LAYERS disabled - not using WebSocket notifications
-# CHANNEL_LAYERS = {
-#     "default": {
-#         "BACKEND": "channels_redis.core.RedisChannelLayer",
-#         "CONFIG": {
-#             "hosts": [("127.0.0.1", 6379)],
-#         },
-#     },
-# }
+CHANNEL_LAYERS = {
+    "default": {
+        "BACKEND": "channels_redis.core.RedisChannelLayer",
+        "CONFIG": {
+            "hosts": [("127.0.0.1", 6379)],
+        },
+    },
+}
 
 
 FIELD_ENCRYPTION_KEY = "G2g9Xb8qH-SZs-So5QEK1EXmf_lUqHuvdgFnitEtRB0="
@@ -109,7 +108,7 @@ TEMPLATES = [
 ]
 
 WSGI_APPLICATION = "budget_transfer.wsgi.application"
-# ASGI_APPLICATION = "budget_transfer.asgi.application"  # Disabled - using WSGI
+ASGI_APPLICATION = "budget_transfer.asgi.application"
 
 # Database
 DATABASES = {

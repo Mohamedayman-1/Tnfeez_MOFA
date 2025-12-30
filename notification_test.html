@@ -1,0 +1,255 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>WebSocket Notification Test</title>
+  <style>
+    :root {
+      --bg: #0f1412;
+      --panel: #161c19;
+      --accent: #7bd389;
+      --accent-2: #4cc9f0;
+      --text: #e6efe8;
+      --muted: #8fa39a;
+      --danger: #ff6b6b;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+      background: radial-gradient(1200px 800px at 20% -10%, #1f2a24 0%, var(--bg) 60%);
+      color: var(--text);
+    }
+    .wrap {
+      max-width: 920px;
+      margin: 0 auto;
+      padding: 32px 20px 60px;
+    }
+    h1 {
+      margin: 0 0 8px;
+      font-size: 26px;
+      letter-spacing: 0.5px;
+    }
+    p { color: var(--muted); margin: 0 0 20px; }
+    .panel {
+      background: var(--panel);
+      border: 1px solid #26302b;
+      border-radius: 14px;
+      padding: 16px;
+      box-shadow: 0 12px 40px rgba(0,0,0,0.35);
+    }
+    .grid {
+      display: grid;
+      gap: 14px;
+      grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+      margin-bottom: 14px;
+    }
+    label { font-size: 12px; color: var(--muted); display: block; margin-bottom: 6px; }
+    input, button {
+      width: 100%;
+      padding: 10px 12px;
+      border-radius: 10px;
+      border: 1px solid #2a3630;
+      background: #0f1512;
+      color: var(--text);
+      font-size: 13px;
+    }
+    button {
+      cursor: pointer;
+      background: linear-gradient(135deg, var(--accent), #44b77c);
+      color: #0a110e;
+      font-weight: 600;
+      border: none;
+    }
+    button.secondary {
+      background: linear-gradient(135deg, #2b3b34, #1b2520);
+      color: var(--text);
+      border: 1px solid #2a3630;
+    }
+    .status {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin-bottom: 10px;
+    }
+    .dot {
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+      background: var(--danger);
+      box-shadow: 0 0 10px rgba(255,107,107,0.6);
+    }
+    .dot.connected {
+      background: var(--accent);
+      box-shadow: 0 0 12px rgba(123,211,137,0.6);
+    }
+    pre {
+      margin: 0;
+      padding: 12px;
+      background: #0c120f;
+      border: 1px solid #24312b;
+      border-radius: 10px;
+      height: 320px;
+      overflow: auto;
+      font-size: 12px;
+      line-height: 1.4;
+    }
+    .row {
+      display: flex;
+      gap: 10px;
+      flex-wrap: wrap;
+    }
+    .row > * { flex: 1 1 140px; }
+    .hint { font-size: 11px; color: var(--muted); margin-top: 8px; }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <h1>Notifications WebSocket Test</h1>
+    <p>Connect to your Django Channels endpoint and view incoming messages.</p>
+
+    <div class="panel">
+      <div class="grid">
+        <div>
+          <label for="host">Host</label>
+          <input id="host" placeholder="localhost:8000" value="localhost:8000" />
+        </div>
+        <div>
+          <label for="path">Path</label>
+          <input id="path" placeholder="/ws/notifications/" value="/ws/notifications/" />
+        </div>
+        <div>
+          <label for="token">JWT Token (optional)</label>
+          <input id="token" placeholder="eyJhbGciOi..." />
+        </div>
+        <div>
+          <label for="userId">user_id (optional)</label>
+          <input id="userId" placeholder="123" />
+        </div>
+      </div>
+
+      <div class="row">
+        <button id="connectBtn">Connect</button>
+        <button id="disconnectBtn" class="secondary">Disconnect</button>
+        <button id="pingBtn" class="secondary">Send Ping</button>
+        <button id="clearBtn" class="secondary">Clear Log</button>
+      </div>
+
+      <div class="status" style="margin-top: 14px;">
+        <span id="dot" class="dot"></span>
+        <span id="statusText">Disconnected</span>
+      </div>
+
+      <pre id="log"></pre>
+      <div class="hint">
+        If you use JWT, add it as ?token=... or via Authorization header. This page uses query params.
+      </div>
+    </div>
+  </div>
+
+  <script>
+    let socket = null;
+
+    const logEl = document.getElementById('log');
+    const statusText = document.getElementById('statusText');
+    const dotEl = document.getElementById('dot');
+
+    const hostEl = document.getElementById('host');
+    const pathEl = document.getElementById('path');
+    const tokenEl = document.getElementById('token');
+    const userIdEl = document.getElementById('userId');
+
+    const connectBtn = document.getElementById('connectBtn');
+    const disconnectBtn = document.getElementById('disconnectBtn');
+    const pingBtn = document.getElementById('pingBtn');
+    const clearBtn = document.getElementById('clearBtn');
+
+    function log(msg) {
+      const ts = new Date().toISOString();
+      logEl.textContent += `[${ts}] ${msg}\n`;
+      logEl.scrollTop = logEl.scrollHeight;
+    }
+
+    function setStatus(connected) {
+      if (connected) {
+        statusText.textContent = 'Connected';
+        dotEl.classList.add('connected');
+      } else {
+        statusText.textContent = 'Disconnected';
+        dotEl.classList.remove('connected');
+      }
+    }
+
+    function buildUrl() {
+      const host = hostEl.value.trim();
+      let path = pathEl.value.trim() || '/ws/notifications/';
+      if (!path.startsWith('/')) path = '/' + path;
+
+      const params = new URLSearchParams();
+      const token = tokenEl.value.trim();
+      const userId = userIdEl.value.trim();
+      if (token) params.set('token', token);
+      if (userId) params.set('user_id', userId);
+
+      const query = params.toString();
+      const protocol = location.protocol === 'https:' ? 'wss' : 'ws';
+      return `${protocol}://${host}${path}${query ? '?' + query : ''}`;
+    }
+
+    function connect() {
+      if (socket && socket.readyState === WebSocket.OPEN) {
+        log('Already connected.');
+        return;
+      }
+
+      const url = buildUrl();
+      log(`Connecting to ${url}`);
+
+      socket = new WebSocket(url);
+
+      socket.addEventListener('open', () => {
+        setStatus(true);
+        log('WebSocket open.');
+      });
+
+      socket.addEventListener('message', (event) => {
+        log(`Message: ${event.data}`);
+      });
+
+      socket.addEventListener('close', (event) => {
+        setStatus(false);
+        log(`WebSocket closed (code=${event.code}).`);
+      });
+
+      socket.addEventListener('error', () => {
+        log('WebSocket error.');
+      });
+    }
+
+    function disconnect() {
+      if (socket) {
+        socket.close();
+        socket = null;
+      }
+    }
+
+    function sendPing() {
+      if (!socket || socket.readyState !== WebSocket.OPEN) {
+        log('Not connected.');
+        return;
+      }
+      const payload = { type: 'ping', timestamp: new Date().toISOString() };
+      socket.send(JSON.stringify(payload));
+      log(`Sent ping: ${JSON.stringify(payload)}`);
+    }
+
+    connectBtn.addEventListener('click', connect);
+    disconnectBtn.addEventListener('click', disconnect);
+    pingBtn.addEventListener('click', sendPing);
+    clearBtn.addEventListener('click', () => { logEl.textContent = ''; });
+
+    setStatus(false);
+  </script>
+</body>
+</html>

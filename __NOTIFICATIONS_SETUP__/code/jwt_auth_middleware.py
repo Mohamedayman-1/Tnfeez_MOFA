@@ -128,6 +128,8 @@ class JWTAuthMiddleware(BaseMiddleware):
             scope['user'] = user
             logger.info(f"🔐 WebSocket auth success: {user}")
         # else: don't set scope['user'], let the next middleware in the stack handle it
+        if "user" not in scope:
+            scope["user"] = AnonymousUser()
         
         return await super().__call__(scope, receive, send)
 
