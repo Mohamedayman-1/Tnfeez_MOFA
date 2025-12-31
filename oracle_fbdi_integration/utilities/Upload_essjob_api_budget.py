@@ -403,21 +403,25 @@ def run_complete_workflow(file_path: str, Groupid: Optional[int] = None, transac
         if group_id:
             user_ids = get_active_user_ids_for_security_group(group_id)
             for uid in user_ids:
+                eng_message = (
+                    f"Starting budget upload for transaction {transaction_obj.code}"
+                )
+                ara_message = (
+                    f"بدء رفع الميزانية للمعاملة {transaction_obj.code}"
+                )
                 xx_notification.objects.create(
                     user_id=uid,
                     Transaction_id=transaction_obj.transaction_id,
                     type_of_Trasnction=transaction_obj.type,
                     Type_of_action="List",
-                    message=(
-                        f"Starting budget upload workflow for transaction {transaction_id}"
-                    ),
+                    eng_message=eng_message,
+                    ara_message=ara_message,
                 )
                 send_upload_started(
                     uid,
                     transaction_id,
-                    message=(
-                        f"Starting budget upload workflow for transaction {transaction_id}"
-                    ),
+                    message=eng_message,
+                    ara_message=ara_message,
                 )
         audit_ucm = xx_budget_integration_audit.objects.create(
             transaction_id=transaction_obj,
@@ -578,21 +582,25 @@ def run_complete_workflow(file_path: str, Groupid: Optional[int] = None, transac
         if group_id:
             user_ids = get_active_user_ids_for_security_group(group_id)
             for uid in user_ids:
+                eng_message = (
+                    f"Budget upload completed for transaction {transaction_obj.code}"
+                )
+                ara_message = (
+                    f"اكتمل رفع الميزانية للمعاملة {transaction_obj.code}"
+                )
                 xx_notification.objects.create(
                     user_id=uid,
                     Transaction_id=transaction_obj.transaction_id,
                     type_of_Trasnction=transaction_obj.type,
                     Type_of_action="List",
-                    message=(
-                        f"Starting budget upload workflow for transaction {transaction_id}"
-                    ),
+                    eng_message=eng_message,
+                    ara_message=ara_message,
                 )
                 send_upload_completed(
                     uid,
                     transaction_id,
-                    message=(
-                        f"Budget upload workflow completed for transaction {transaction_id}"
-                    ),
+                    message=eng_message,
+                    ara_message=ara_message,
                 )
         return workflow_results
         

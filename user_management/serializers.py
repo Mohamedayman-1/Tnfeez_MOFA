@@ -95,7 +95,16 @@ class UserLevelSerializer(serializers.ModelSerializer):
 class NotificationSerializer(serializers.Serializer):
     class Meta:
         model = Notification
-        fields = ['id', 'user', 'message', 'is_read','is_shown','is_system_read', 'created_at']
+        fields = [
+            'id',
+            'user',
+            'eng_message',
+            'ara_message',
+            'is_read',
+            'is_shown',
+            'is_system_read',
+            'created_at',
+        ]
 
 
 # =============================================================================

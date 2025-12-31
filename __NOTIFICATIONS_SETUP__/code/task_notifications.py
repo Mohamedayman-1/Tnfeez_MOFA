@@ -127,7 +127,7 @@ def send_progress_notification(user_id, step_name, current_step, total_steps,
     return send_notification(user_id, 'oracle_upload_progress', data)
 
 
-def send_upload_started(user_id, transaction_id, message=None):
+def send_upload_started(user_id, transaction_id, message=None, ara_message=None):
     """
     Send upload started notification
     
@@ -136,13 +136,17 @@ def send_upload_started(user_id, transaction_id, message=None):
         transaction_id: Transaction ID
         message: Optional custom message
     """
+    eng_message = message or f'Oracle upload started for transaction {transaction_id}'
+    ara_message = ara_message or eng_message
     return send_notification(user_id, 'oracle_upload_started', {
         'transaction_id': transaction_id,
-        'message': message or f'Oracle upload started for transaction {transaction_id}'
+        'message': eng_message,
+        'eng_message': eng_message,
+        'ara_message': ara_message,
     })
 
 
-def send_upload_completed(user_id, transaction_id, result_path=None, message=None):
+def send_upload_completed(user_id, transaction_id, result_path=None, message=None, ara_message=None):
     """
     Send upload completed notification
     
@@ -152,9 +156,13 @@ def send_upload_completed(user_id, transaction_id, result_path=None, message=Non
         result_path: Optional path to result file
         message: Optional custom message
     """
+    eng_message = message or f'Oracle upload completed for transaction {transaction_id}'
+    ara_message = ara_message or eng_message
     data = {
         'transaction_id': transaction_id,
-        'message': message or f'Oracle upload completed for transaction {transaction_id}',
+        'message': eng_message,
+        'eng_message': eng_message,
+        'ara_message': ara_message,
         'success': True
     }
     
@@ -164,7 +172,7 @@ def send_upload_completed(user_id, transaction_id, result_path=None, message=Non
     return send_notification(user_id, 'oracle_upload_completed', data)
 
 
-def send_upload_failed(user_id, transaction_id, error, message=None):
+def send_upload_failed(user_id, transaction_id, error, message=None, ara_message=None):
     """
     Send upload failed notification
     
@@ -174,14 +182,26 @@ def send_upload_failed(user_id, transaction_id, error, message=None):
         error: Error message or exception
         message: Optional custom message
     """
+    eng_message = message or f'Oracle upload failed for transaction {transaction_id}'
+    ara_message = ara_message or eng_message
     return send_notification(user_id, 'oracle_upload_failed', {
         'transaction_id': transaction_id,
-        'message': message or f'Oracle upload failed for transaction {transaction_id}',
+        'message': eng_message,
+        'eng_message': eng_message,
+        'ara_message': ara_message,
         'error': str(error)
     })
 
 
-def send_generic_message(user_id, message, data=None):
+def send_generic_message(
+    user_id,
+    message,
+    data=None,
+    eng_message=None,
+    ara_message=None,
+    notification=None,
+    notification_id=None,
+):
     """
     Send a generic notification message
     
@@ -190,10 +210,44 @@ def send_generic_message(user_id, message, data=None):
         message: Message text
         data: Optional additional data
     """
-    return send_notification(user_id, 'notification_message', {
-        'message': message,
-        'data': data or {}
-    })
+    if notification is None and notification_id:
+        try:
+            from user_management.models import xx_notification
+            notification = xx_notification.objects.filter(id=notification_id).first()
+        except Exception:
+            notification = None
+
+    if notification is not None:
+        payload = {
+            "id": notification.id,
+            "Transaction_id": notification.Transaction_id,
+            "Type_of_action": notification.Type_of_action,
+            "type_of_Trasnction": notification.type_of_Trasnction,
+            "eng_message": notification.eng_message,
+            "ara_message": notification.ara_message,
+            "message": notification.eng_message,
+            "is_read": notification.is_read,
+            "is_shown": notification.is_shown,
+            "is_system_read": notification.is_system_read,
+            "created_at": (
+                notification.created_at.isoformat()
+                if getattr(notification, "created_at", None)
+                else None
+            ),
+        }
+    else:
+        if eng_message is None:
+            eng_message = message
+        if ara_message is None:
+            ara_message = eng_message
+        payload = {
+            "eng_message": eng_message,
+            "ara_message": ara_message,
+            "message": eng_message,
+        }
+
+    payload["data"] = data or {}
+    return send_notification(user_id, "notification_message", payload)
 
 
 def send_workflow_notification(transaction_id, step, step_number, total_steps, message, status='processing'):

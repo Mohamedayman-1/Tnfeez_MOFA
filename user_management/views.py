@@ -572,7 +572,9 @@ class UnRead_Notification(APIView):
         data = [
             {
                 "id": notification.id,
-                "message": notification.message,
+                "message": notification.eng_message,
+                "eng_message": notification.eng_message,
+                "ara_message": notification.ara_message,
                 "is_read": notification.is_read,
                 "created_at": notification.created_at,
                 "is_shown": notification.is_shown,
@@ -621,7 +623,9 @@ class Get_All_Notification(APIView):
         data = [
             {
                 "id": notification.id,
-                "message": notification.message,
+                "message": notification.eng_message,
+                "eng_message": notification.eng_message,
+                "ara_message": notification.ara_message,
                 "is_read": notification.is_read,
                 "created_at": notification.created_at,
                 "is_shown": notification.is_shown,

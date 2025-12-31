@@ -161,21 +161,24 @@ def create_workflow_instance(sender, instance, created, **kwargs):
                 recipient_ids.add(instance.user_id)
 
             if recipient_ids:
-                message = (
-                    f"Transaction {instance.code} submitted for approval"
-                )
+                eng_message = f"Transaction {instance.code} submitted for approval"
+                ara_message = f"تم إرسال المعاملة {instance.code} للاعتماد"
                 for user_id in recipient_ids:
                     action_type = "List" if user_id == instance.user_id else "Approval"
-                    xx_notification.objects.create(
+                    notification = xx_notification.objects.create(
                         user_id=user_id,
                         Transaction_id=instance.transaction_id,
                         type_of_Trasnction=instance.type,
                         Type_of_action=action_type,
-                        message=message,
+                        eng_message=eng_message,
+                        ara_message=ara_message,
                     )
                     send_generic_message(
                         user_id,
-                        message=message,
+                        message=eng_message,
+                        eng_message=eng_message,
+                        ara_message=ara_message,
+                        notification=notification,
                         data={
                             "transaction_id": instance.transaction_id,
                             "status": "submitted",

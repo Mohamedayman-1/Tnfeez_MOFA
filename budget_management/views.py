@@ -308,9 +308,12 @@ class CreateBudgetTransferView(APIView):
                             from_segment_value=segment.from_segment_value,
                             to_segment_value=segment.to_segment_value,
                         )
+            eng_message = f"New budget transfer request created with code {new_code}"
+            ara_message = f"تم إنشاء طلب تحويل ميزانية جديد بالرمز {new_code}"
             Notification_object = xx_notification.objects.create(
                 user_id=request.user.id,
-                message=f"New budget transfer request created with code {new_code}",
+                eng_message=eng_message,
+                ara_message=ara_message,
                 type_of_Trasnction=transfer.type,
                 Transaction_id=transfer.transaction_id,
                 Type_of_action="List"
@@ -318,7 +321,10 @@ class CreateBudgetTransferView(APIView):
             Notification_object.save()
             send_generic_message(
                 request.user.id,
-                message=f"New budget transfer request created with code {new_code}",
+                message=eng_message,
+                eng_message=eng_message,
+                ara_message=ara_message,
+                notification=Notification_object,
                 data={
                     "transaction_id": transfer.transaction_id,
                     "code": new_code,
@@ -351,8 +357,6 @@ class ListBudgetTransferView(APIView):
         year = request.query_params.get("year")
         sdate = request.query_params.get("start_date")
         edate = request.query_params.get("end_date")
-        user_id = request.query_params.get("user_id", None)
-        status = request.query_params.get("status", None)
         code = request.query_params.get("code", None)
 
         # ====== SECURITY GROUP FILTERING ======
@@ -557,6 +561,22 @@ class ListBudgetTransferView(APIView):
                 if sd > ed:
                     sd, ed = ed, sd
                 transfers = transfers.filter(request_date__gte=sd, request_date__lte=ed)
+            elif sdate:
+                sd = str(sdate)
+                if not _validate("%Y-%m-%d", sd):
+                    return Response(
+                        {"error": "Invalid start_date. Use YYYY-MM-DD"},
+                        status=status.HTTP_400_BAD_REQUEST,
+                    )
+                transfers = transfers.filter(request_date__startswith=sd)
+            elif edate:
+                ed = str(edate)
+                if not _validate("%Y-%m-%d", ed):
+                    return Response(
+                        {"error": "Invalid end_date. Use YYYY-MM-DD"},
+                        status=status.HTTP_400_BAD_REQUEST,
+                    )
+                transfers = transfers.filter(request_date__startswith=ed)
         except Exception as _date_err:
             return Response(
                 {"error": f"Failed to apply date filter: {_date_err}"},

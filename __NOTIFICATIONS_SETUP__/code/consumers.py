@@ -94,16 +94,32 @@ class NotificationConsumer(AsyncWebsocketConsumer):
     async def notification_message(self, event):
         """
         Handler for general notification messages
-        Called when Celery sends notification via channel layer
+        Sends all notification fields as saved in the database, including Transaction_id if present.
         """
         try:
             logger.info(f"📨 notification_message received: {event}")
-            await self.send(text_data=json.dumps({
+            # If event['data'] contains notification model fields, send them all
+            notification_data = event.get('data', {})
+            response = {
                 'type': 'notification',
-                'message': event['message'],
-                'data': event.get('data', {}),
-                'timestamp': event.get('timestamp', None)
-            }))
+                'message': event.get('message', ''),
+                'eng_message': event.get('eng_message', event.get('message', '')),
+                'ara_message': event.get('ara_message', event.get('message', '')),
+                'timestamp': event.get('timestamp', None),
+            }
+            # Add all notification fields if present (prefer top-level event)
+            for key in [
+                'id', 'user', 'ara_message', 'eng_message', 'is_read', 'created_at',
+                'is_system_read', 'is_shown', 'type_of_Trasnction', 'Type_of_action', 'Transaction_id']:
+                if key in event:
+                    response[key] = event[key]
+                elif key in notification_data:
+                    response[key] = notification_data[key]
+            # Also include all other fields in data
+            for k, v in notification_data.items():
+                if k not in response:
+                    response[k] = v
+            await self.send(text_data=json.dumps(response, default=str))
             logger.info(f"✅ notification_message sent successfully")
         except Exception as e:
             logger.error(f"❌ Error in notification_message: {e}", exc_info=True)
@@ -119,6 +135,8 @@ class NotificationConsumer(AsyncWebsocketConsumer):
                 'type': 'oracle_upload_started',
                 'transaction_id': event['transaction_id'],
                 'message': event['message'],
+                'eng_message': event.get('eng_message', event.get('message')),
+                'ara_message': event.get('ara_message', event.get('message')),
                 'timestamp': event.get('timestamp')
             }))
             logger.info(f"✅ oracle_upload_started sent successfully")
@@ -139,6 +157,8 @@ class NotificationConsumer(AsyncWebsocketConsumer):
                 'step_number': event.get('step_number'),
                 'total_steps': event.get('total_steps', 5),
                 'message': event['message'],
+                'eng_message': event.get('eng_message', event.get('message')),
+                'ara_message': event.get('ara_message', event.get('message')),
                 'status': event.get('status', 'processing'),
                 'timestamp': event.get('timestamp')
             }))
@@ -156,6 +176,8 @@ class NotificationConsumer(AsyncWebsocketConsumer):
                 'type': 'oracle_upload_completed',
                 'transaction_id': event['transaction_id'],
                 'message': event['message'],
+                'eng_message': event.get('eng_message', event.get('message')),
+                'ara_message': event.get('ara_message', event.get('message')),
                 'success': event.get('success', True),
                 'result_path': event.get('result_path'),
                 'timestamp': event.get('timestamp')
@@ -172,6 +194,8 @@ class NotificationConsumer(AsyncWebsocketConsumer):
                 'type': 'oracle_upload_failed',
                 'transaction_id': event['transaction_id'],
                 'message': event['message'],
+                'eng_message': event.get('eng_message', event.get('message')),
+                'ara_message': event.get('ara_message', event.get('message')),
                 'error': event.get('error'),
                 'timestamp': event.get('timestamp')
             }))

@@ -762,6 +762,45 @@ class ApprovalManager:
             if action in (ApprovalAction.ACTION_APPROVE, ApprovalAction.ACTION_REJECT):
                 assignment.status = action
                 assignment.save(update_fields=["status"])
+                workflow_instance = active_stage.workflow_instance
+                assignment_user_ids = workflow_instance.stage_instances.values_list(
+                    "assignments__user_id",
+                    flat=True,
+                )
+                recipient_ids = {uid for uid in assignment_user_ids if uid}
+                if getattr(budget_transfer, "user_id", None):
+                    recipient_ids.add(budget_transfer.user_id)
+
+                action_label = "approved" if action == ApprovalAction.ACTION_APPROVE else "rejected"
+                eng_message = (
+                    f"{user.username} {action_label} transaction {budget_transfer.code}"
+                )
+                if action == ApprovalAction.ACTION_APPROVE:
+                    ara_message = f"قام {user.username} باعتماد المعاملة {budget_transfer.code}"
+                else:
+                    ara_message = f"قام {user.username} برفض المعاملة {budget_transfer.code}"
+
+                for user_id in recipient_ids:
+                    notification = xx_notification.objects.create(
+                        user_id=user_id,
+                        Transaction_id=budget_transfer.transaction_id,
+                        type_of_Trasnction=budget_transfer.type,
+                        Type_of_action="Approval",
+                        eng_message=eng_message,
+                        ara_message=ara_message,
+                    )
+                    send_generic_message(
+                        user_id,
+                        message=eng_message,
+                        eng_message=eng_message,
+                        ara_message=ara_message,
+                        notification=notification,
+                        data={
+                            "transaction_id": budget_transfer.transaction_id,
+                            "status": action_label,
+                            "code": budget_transfer.code,
+                        },
+                    )
 
             # Evaluate whether stage group has finished
             finished, outcome = cls.check_finished_stage(budget_transfer)
@@ -858,8 +897,11 @@ class ApprovalManager:
             budget_transfer = getattr(workflow_instance, "budget_transfer", None)
             if budget_transfer:
                 stage_name = getattr(stage_instance.stage_template, "name", "Stage")
-                delegate_message = (
+                eng_message = (
                     f"Stage {stage_name} delegated to {to_user} for transaction {budget_transfer.code}"
+                )
+                ara_message = (
+                    f"تم تفويض المرحلة {stage_name} إلى {to_user} للمعاملة {budget_transfer.code}"
                 )
                 assignment_user_ids = workflow_instance.stage_instances.values_list(
                     "assignments__user_id",
@@ -870,16 +912,20 @@ class ApprovalManager:
                     recipient_ids.add(budget_transfer.user_id)
 
                 for user_id in recipient_ids:
-                    xx_notification.objects.create(
+                    notification = xx_notification.objects.create(
                         user_id=user_id,
                         Transaction_id=budget_transfer.transaction_id,
                         type_of_Trasnction=budget_transfer.type,
                         Type_of_action="Approval",
-                        message=delegate_message,
+                        eng_message=eng_message,
+                        ara_message=ara_message,
                     )
                     send_generic_message(
                         user_id,
-                        message=delegate_message,
+                        message=eng_message,
+                        eng_message=eng_message,
+                        ara_message=ara_message,
+                        notification=notification,
                         data={
                             "transaction_id": budget_transfer.transaction_id,
                             "status": "delegated",
@@ -1094,15 +1140,14 @@ class ApprovalManager:
         if not last_action:
             return
 
+        stage_name = getattr(stage_instance.stage_template, "name", "Stage")
         status_label = (
             "approved"
             if last_action.action == ApprovalAction.ACTION_APPROVE
             else "rejected"
         )
-        stage_name = getattr(stage_instance.stage_template, "name", "Stage")
-        message = (
-            f"Stage {stage_name} {status_label} for transaction {budget_transfer.code}"
-        )
+        eng_message = f"Stage {stage_name} completed for transaction {budget_transfer.code}"
+        ara_message = f"اكتملت المرحلة {stage_name} للمعاملة {budget_transfer.code}"
 
         workflow_instance = stage_instance.workflow_instance
         assignment_user_ids = workflow_instance.stage_instances.values_list(
@@ -1114,16 +1159,20 @@ class ApprovalManager:
             recipient_ids.add(budget_transfer.user_id)
 
         for user_id in recipient_ids:
-            xx_notification.objects.create(
+            notification = xx_notification.objects.create(
                 user_id=user_id,
                 Transaction_id=budget_transfer.transaction_id,
                 type_of_Trasnction=budget_transfer.type,
                 Type_of_action="Approval",
-                message=message,
+                eng_message=eng_message,
+                ara_message=ara_message,
             )
             send_generic_message(
                 user_id,
-                message=message,
+                message=eng_message,
+                eng_message=eng_message,
+                ara_message=ara_message,
+                notification=notification,
                 data={
                     "transaction_id": budget_transfer.transaction_id,
                     "status": status_label,

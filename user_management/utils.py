@@ -5,7 +5,7 @@ from rest_framework.response import Response
 from .models import xx_notification
 from .models import XX_UserGroupMembership
 
-def send_notification(user, message, notification_type="info"):
+def send_notification(user, eng_message=None, ara_message=None, message=None, notification_type="info"):
     """
     Send a notification to a specific user
     
@@ -14,10 +14,16 @@ def send_notification(user, message, notification_type="info"):
         message: The notification message
         notification_type: Type of notification (info, success, warning, error)
     """
+    if eng_message is None:
+        eng_message = message or ""
+    if ara_message is None:
+        ara_message = eng_message
+
     # Create database notification
     notification = xx_notification.objects.create(
         user=user,
-        message=message
+        eng_message=eng_message,
+        ara_message=ara_message,
     )
     
     # Send real-time notification via WebSocket
@@ -28,7 +34,9 @@ def send_notification(user, message, notification_type="info"):
             'type': 'send_notification',
             'message': {
                 'id': notification.id,
-                'message': message,
+                'message': eng_message,
+                'eng_message': eng_message,
+                'ara_message': ara_message,
                 'created_at': notification.created_at.isoformat(),
                 'type': notification_type
             }

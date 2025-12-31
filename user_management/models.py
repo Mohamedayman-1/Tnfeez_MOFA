@@ -678,7 +678,8 @@ class XX_UserGroupMembership(models.Model):
 class xx_notification(models.Model):
     """Model to represent notifications for users."""
     user = models.ForeignKey(xx_User, on_delete=models.CASCADE, related_name='notifications')
-    message = models.TextField()  # Changed from EncryptedTextField
+    ara_message = models.TextField()
+    eng_message = models.TextField()
     is_read = models.BooleanField(default=False)
     created_at = models.DateTimeField(auto_now_add=True)
     is_system_read = models.BooleanField(default=False)  # For tracking if the notification was read on the OS system
@@ -691,5 +692,10 @@ class xx_notification(models.Model):
         db_table = 'XX_NOTIFICATION_XX'
         ordering = ['-created_at']
 
+    @property
+    def message(self):
+        return self.eng_message
+
     def __str__(self):
-        return f"Notification for {self.user.username}: {self.message[:20]}"
+        preview = (self.eng_message or self.ara_message or "")[:20]
+        return f"Notification for {self.user.username}: {preview}"
