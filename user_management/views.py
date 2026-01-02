@@ -37,6 +37,9 @@ from account_and_entitys.models import (
 )
 from Admin_Panel.models import MainCurrency, MainRoutesName
 
+# Audit logging
+from .audit_utils import AuditLogger
+
 # from test_querty import LLMQueryGenerator
 # from django.db import connection
 # Authentication Views
@@ -51,7 +54,6 @@ class RefreshTokenView(APIView):
 
     def post(self, request):
         refresh_token = request.data.get("refresh")
-        user_id = request.data.get("user_id")
         if not refresh_token:
             return Response(
                 {"error": "Refresh token is required"},
@@ -61,8 +63,14 @@ class RefreshTokenView(APIView):
             # Validate the old refresh token
             old_refresh = RefreshToken(refresh_token)
 
-            # Get the user from the refresh token
-            # user_id = old_refresh.payload.get('user_id')
+            # Get the user ID from the refresh token payload
+            user_id = old_refresh.payload.get('user_id')
+            if not user_id:
+                return Response(
+                    {"error": "Invalid token payload"},
+                    status=status.HTTP_401_UNAUTHORIZED,
+                )
+            
             user = xx_User.objects.get(id=user_id)
 
             # Create a completely new refresh token for the user
@@ -127,6 +135,13 @@ class LoginView(APIView):
             user = serializer.validated_data
             refresh = RefreshToken.for_user(user)
 
+            # Log successful login
+            AuditLogger.log_login(
+                user=user,
+                success=True,
+                request=request
+            )
+
             return Response(
                 {
                     "data": RegisterSerializer(user).data,
@@ -141,6 +156,24 @@ class LoginView(APIView):
                     "refresh": str(refresh),
                 }
             )
+
+        # Log failed login attempt
+        username = request.data.get('username', 'Unknown')
+        AuditLogger.log_login(
+            user=None,
+            success=False,
+            failure_reason="Invalid credentials",
+            request=request
+        )
+        # Create a temporary user object for logging
+        from django.contrib.auth.models import AnonymousUser
+        temp_user = type('User', (), {'username': username})()
+        AuditLogger.log_login(
+            user=temp_user,
+            success=False,
+            failure_reason="Invalid credentials",
+            request=request
+        )
 
         return Response(
             {"message": "Invalid credentials."}, status=status.HTTP_401_UNAUTHORIZED
@@ -190,6 +223,9 @@ class LogoutView(APIView):
                 except Exception:
                     # Any import/blacklist issues are non-fatal for logout
                     pass
+
+            # Log logout
+            AuditLogger.log_logout(user=request.user, request=request)
 
             return Response(
                 {"message": "Logout successful."}, status=status.HTTP_205_RESET_CONTENT

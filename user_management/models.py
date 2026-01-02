@@ -699,3 +699,7 @@ class xx_notification(models.Model):
     def __str__(self):
         preview = (self.eng_message or self.ara_message or "")[:20]
         return f"Notification for {self.user.username}: {preview}"
+
+
+# Import audit models at the end to avoid circular imports
+from .audit_models import XX_AuditLog, XX_AuditLoginHistory

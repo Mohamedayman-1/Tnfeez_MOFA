@@ -87,6 +87,7 @@ MIDDLEWARE = [
     "django.contrib.messages.middleware.MessageMiddleware",
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
     "user_management.middleware.UserMiddleware",  # Updated middleware reference
+    "user_management.audit_middleware.AuditLoggingMiddleware",  # Audit logging
 ]
 
 ROOT_URLCONF = "budget_transfer.urls"

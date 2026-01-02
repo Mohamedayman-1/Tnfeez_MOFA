@@ -1,4 +1,5 @@
 from django.urls import path
+from django.urls import path, include
 from .views import ChangePasswordView, LogoutView, RegisterView, LoginView, TokenExpiredView, ListUsersView, UpdateUserPermissionView, UserAbilitiesView, UserLevelListView, UserLevelCreateView, UpdateUserLevelView, UserProjectsView, UserUpdateView, UserDeleteView, UserLevelUpdateView, UserLevelDeleteView,RefreshTokenView
 from rest_framework_simplejwt.views import TokenRefreshView
 
@@ -212,5 +213,7 @@ urlpatterns = [
          name="delete-notification",
      ),
 
+     # Audit Logging endpoints
+     path('audit/', include('user_management.urls_audit')),
      
 ]

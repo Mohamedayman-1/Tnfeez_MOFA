@@ -16,6 +16,7 @@ from .models import (
     xx_notification,
     XX_SecurityGroup
 )
+from .audit_models import XX_AuditLog, XX_AuditLoginHistory
 
 
 @admin.register(xx_UserLevel)
@@ -220,3 +221,191 @@ class SecurityGroupAdmin(admin.ModelAdmin):
     search_fields = ('group_name', 'description')
     readonly_fields = ('created_at', 'updated_at')
     ordering = ('group_name',)
+
+
+@admin.register(XX_AuditLog)
+class AuditLogAdmin(admin.ModelAdmin):
+    """Admin interface for audit logs."""
+    list_display = (
+        'audit_id',
+        'timestamp',
+        'username',
+        'action_type',
+        'action_preview',
+        'severity',
+        'status',
+        'module',
+        'duration_display',
+    )
+    list_filter = (
+        'action_type',
+        'severity',
+        'status',
+        'module',
+        'timestamp',
+    )
+    search_fields = (
+        'username',
+        'action_description',
+        'endpoint',
+        'ip_address',
+        'object_repr',
+    )
+    readonly_fields = (
+        'audit_id',
+        'user',
+        'username',
+        'action_type',
+        'action_description',
+        'severity',
+        'endpoint',
+        'request_method',
+        'ip_address',
+        'user_agent',
+        'content_type',
+        'object_id',
+        'object_repr',
+        'old_values',
+        'new_values',
+        'metadata',
+        'status',
+        'error_message',
+        'timestamp',
+        'duration_ms',
+        'module',
+    )
+    ordering = ('-timestamp',)
+    date_hierarchy = 'timestamp'
+    list_per_page = 50
+    
+    def has_add_permission(self, request):
+        """Disable manual creation of audit logs"""
+        return False
+    
+    def has_delete_permission(self, request, obj=None):
+        """Only superadmins can delete audit logs"""
+        return request.user.is_superuser
+    
+    def action_preview(self, obj):
+        """Show first 80 characters of action description"""
+        desc = obj.action_description
+        return desc[:80] + '...' if len(desc) > 80 else desc
+    action_preview.short_description = "Action"
+    
+    def duration_display(self, obj):
+        """Format duration nicely"""
+        if obj.duration_ms is None:
+            return '-'
+        if obj.duration_ms < 1000:
+            return f"{obj.duration_ms}ms"
+        return f"{obj.duration_ms / 1000:.2f}s"
+    duration_display.short_description = "Duration"
+    
+    fieldsets = (
+        ('User Information', {
+            'fields': ('user', 'username', 'ip_address', 'user_agent')
+        }),
+        ('Action Details', {
+            'fields': (
+                'action_type',
+                'action_description',
+                'severity',
+                'status',
+                'error_message',
+            )
+        }),
+        ('Request Information', {
+            'fields': ('endpoint', 'request_method', 'module', 'timestamp', 'duration_ms'),
+        }),
+        ('Affected Object', {
+            'fields': ('content_type', 'object_id', 'object_repr'),
+            'classes': ('collapse',)
+        }),
+        ('Change Tracking', {
+            'fields': ('old_values', 'new_values'),
+            'classes': ('collapse',)
+        }),
+        ('Additional Metadata', {
+            'fields': ('metadata',),
+            'classes': ('collapse',)
+        }),
+    )
+
+
+@admin.register(XX_AuditLoginHistory)
+class AuditLoginHistoryAdmin(admin.ModelAdmin):
+    """Admin interface for login history."""
+    list_display = (
+        'login_id',
+        'timestamp',
+        'username',
+        'login_type',
+        'success_display',
+        'ip_address',
+        'location_display',
+    )
+    list_filter = (
+        'login_type',
+        'success',
+        'timestamp',
+    )
+    search_fields = (
+        'username',
+        'ip_address',
+        'failure_reason',
+    )
+    readonly_fields = (
+        'login_id',
+        'user',
+        'username',
+        'login_type',
+        'ip_address',
+        'user_agent',
+        'timestamp',
+        'success',
+        'failure_reason',
+        'session_key',
+        'country',
+        'city',
+    )
+    ordering = ('-timestamp',)
+    date_hierarchy = 'timestamp'
+    list_per_page = 50
+    
+    def has_add_permission(self, request):
+        """Disable manual creation of login history"""
+        return False
+    
+    def has_delete_permission(self, request, obj=None):
+        """Only superadmins can delete login history"""
+        return request.user.is_superuser
+    
+    def success_display(self, obj):
+        """Display success as icon"""
+        if obj.success:
+            return format_html('<span style="color: green;">✓ Success</span>')
+        return format_html('<span style="color: red;">✗ Failed</span>')
+    success_display.short_description = "Status"
+    
+    def location_display(self, obj):
+        """Display location if available"""
+        parts = []
+        if obj.city:
+            parts.append(obj.city)
+        if obj.country:
+            parts.append(obj.country)
+        return ', '.join(parts) if parts else '-'
+    location_display.short_description = "Location"
+    
+    fieldsets = (
+        ('User Information', {
+            'fields': ('user', 'username', 'session_key')
+        }),
+        ('Login Details', {
+            'fields': ('login_type', 'timestamp', 'success', 'failure_reason')
+        }),
+        ('Network Information', {
+            'fields': ('ip_address', 'user_agent', 'country', 'city'),
+        }),
+    )
+

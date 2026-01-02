@@ -8,3 +8,4 @@ class UserManagementConfig(AppConfig):
     def ready(self):
         """Import signals when app is ready."""
         import user_management.signals  # noqa
+        import user_management.audit_signals  # noqa - Import audit signals
